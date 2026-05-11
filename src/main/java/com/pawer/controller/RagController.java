@@ -1,5 +1,6 @@
 package com.pawer.controller;
 
+import com.pawer.chunking.ChunkingStrategy;
 import com.pawer.service.PdfIngestionService;
 import com.pawer.service.RagService;
 import lombok.RequiredArgsConstructor;
@@ -7,7 +8,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import reactor.core.publisher.Flux;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -19,58 +22,71 @@ public class RagController {
     private final PdfIngestionService ingestionService;
     private final RagService ragService;
 
+    // ── Dostępne strategie ──────────────────────────────────────────────────
+    @GetMapping("/strategies")
+    public List<Map<String, String>> strategies() {
+        return Arrays.stream(ChunkingStrategy.values())
+                .map(s -> Map.of(
+                        "name", s.name(),
+                        "description", strategyDescription(s)
+                ))
+                .toList();
+    }
+
     // ── Zaindeksuj PDF ──────────────────────────────────────────────────────
     @PostMapping(value = "/ingest", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<Map<String, Object>> ingest(
-            @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> ingest(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "strategy", defaultValue = "TOKEN") ChunkingStrategy strategy) {
 
         if (file.isEmpty()) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Plik jest pusty"));
+            return ResponseEntity.badRequest().body(Map.of("error", "Plik jest pusty"));
         }
         if (!file.getOriginalFilename().toLowerCase().endsWith(".pdf")) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Tylko pliki PDF"));
+            return ResponseEntity.badRequest().body(Map.of("error", "Tylko pliki PDF"));
         }
 
-        int chunks = ingestionService.ingest(file.getResource());
-        return ResponseEntity.ok(Map.of(
-                "file",   file.getOriginalFilename(),
-                "chunks", chunks,
-                "status", "zaindeksowano"
-        ));
+        PdfIngestionService.IngestResult result = ingestionService.ingest(file.getResource(), strategy);
+        return ResponseEntity.ok(result);
     }
 
-    // ── Podgląd chunków (bez zapisu) ────────────────────────────────────────
+    // ── Podgląd chunków bez zapisu ──────────────────────────────────────────
     @PostMapping(value = "/preview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<List<Map<String, Object>>> preview(
-            @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> preview(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "strategy", defaultValue = "TOKEN") ChunkingStrategy strategy) {
 
-        List<Map<String, Object>> chunks = ingestionService.preview(file.getResource());
-        return ResponseEntity.ok(chunks);
+        return ResponseEntity.ok(ingestionService.preview(file.getResource(), strategy));
     }
 
-    // ── Zapytaj ─────────────────────────────────────────────────────────────
+    // ── Zapytaj (zwykły request) ────────────────────────────────────────────
     @GetMapping("/query")
-    public ResponseEntity<Map<String, Object>> query(
-            @RequestParam String q) {
-
+    public ResponseEntity<Map<String, Object>> query(@RequestParam String q) {
         String answer = ragService.query(q);
-        return ResponseEntity.ok(Map.of(
-                "question", q,
-                "answer",   answer
-        ));
+        return ResponseEntity.ok(Map.of("question", q, "answer", answer));
+    }
+
+    // ── Zapytaj (streaming SSE) ─────────────────────────────────────────────
+    @GetMapping(value = "/query/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> queryStream(@RequestParam String q) {
+        return ragService.query_stream(q);
     }
 
     // ── Usuń dokumenty po nazwie pliku ──────────────────────────────────────
     @DeleteMapping("/delete")
-    public ResponseEntity<Map<String, Object>> delete(
-            @RequestParam String fileName) {
-
+    public ResponseEntity<Map<String, Object>> delete(@RequestParam String fileName) {
         ingestionService.delete(fileName);
-        return ResponseEntity.ok(Map.of(
-                "file",   fileName,
-                "status", "usunięto"
-        ));
+        return ResponseEntity.ok(Map.of("file", fileName, "status", "usunięto"));
+    }
+
+    // ── Opisy strategii ─────────────────────────────────────────────────────
+    private String strategyDescription(ChunkingStrategy s) {
+        return switch (s) {
+            case TOKEN       -> "Stała liczba tokenów z nakładką. Szybki, ogólny.";
+            case PARAGRAPH   -> "Podział po nagłówkach PDF (wymaga TOC). Dobry dla dokumentacji.";
+            case SENTENCE    -> "Grupowanie zdań do max rozmiaru. Dobry dla artykułów.";
+            case HIERARCHICAL-> "Parent-Child: małe chunki do retrieval, duże jako kontekst LLM.";
+            case SEMANTIC    -> "Atomowe twierdzenia przez LLM. Najlepsza jakość, najwolniejszy.";
+        };
     }
 }

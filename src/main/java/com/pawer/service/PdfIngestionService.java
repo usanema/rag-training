@@ -1,18 +1,18 @@
 package com.pawer.service;
 
-import com.pawer.config.RagProperties;
+import com.pawer.chunking.ChunkerFactory;
+import com.pawer.chunking.ChunkingResult;
+import com.pawer.chunking.ChunkingStrategy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
-import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -20,76 +20,85 @@ import java.util.Map;
 public class PdfIngestionService {
 
     private final VectorStore vectorStore;
-    private final RagProperties ragProperties;
+    private final ChunkerFactory chunkerFactory;
 
-    public int ingest(Resource pdfResource) {
-        log.info("Wczytuję PDF: {}", pdfResource.getFilename());
+    // parentId -> Document — przechowywane w pamięci dla strategii HIERARCHICAL
+    private final Map<String, Document> parentStore = new ConcurrentHashMap<>();
 
-        // 1. Wczytaj PDF strona po stronie
-        List<Document> pages = new PagePdfDocumentReader(
-                pdfResource,
-                PdfDocumentReaderConfig.builder()
-                        .withPagesPerDocument(1)
-                        .build()
-        ).read();
+    // ── Ingest ───────────────────────────────────────────────────────────────
 
-        log.info("Wczytano stron: {}", pages.size());
+    public IngestResult ingest(Resource pdfResource, ChunkingStrategy strategy) {
+        log.info("Ingesting '{}' | strategia: {}", pdfResource.getFilename(), strategy);
+        long start = System.currentTimeMillis();
 
-        // 2. Podziel na chunki
-        var splitter = buildSplitter();
-        List<Document> chunks = splitter.apply(pages);
+        long t1 = System.currentTimeMillis();
+        ChunkingResult result = chunkerFactory.get(strategy).chunk(pdfResource);
+        long chunkingMs = System.currentTimeMillis() - t1;
 
-        // 3. Dodaj nazwę pliku do metadata każdego chunka
-        String fileName = pdfResource.getFilename();
-        chunks.forEach(chunk ->
-                chunk.getMetadata().put("source", fileName)
+        // Dla HIERARCHICAL — zapisz parent chunki do lokalnego store
+        if (result.hasParents()) {
+            parentStore.putAll(result.parentChunks());
+            log.info("Zapisano {} parent chunków do pamięci", result.parentChunks().size());
+        }
+
+        long t2 = System.currentTimeMillis();
+        vectorStore.add(result.chunks());
+        long embeddingMs = System.currentTimeMillis() - t2;
+
+        long totalMs = System.currentTimeMillis() - start;
+
+        log.info("✅ Zaindeksowano {} chunków | chunking: {}ms | embedding+add: {}ms | total: {}ms",
+                result.chunks().size(), chunkingMs, embeddingMs, totalMs);
+
+        return new IngestResult(
+                pdfResource.getFilename(),
+                strategy.name(),
+                result.chunks().size(),
+                chunkingMs,
+                embeddingMs,
+                totalMs
         );
-
-        log.info("Powstało chunków: {}", chunks.size());
-
-        // 4. Zaindeksuj w Qdrant
-        vectorStore.add(chunks);
-
-        log.info("✅ Zaindeksowano {} chunków z pliku: {}", chunks.size(), fileName);
-        return chunks.size();
     }
 
-    // Podgląd chunków bez zapisywania do vector store
-    public List<Map<String, Object>> preview(Resource pdfResource) {
-        List<Document> pages = new PagePdfDocumentReader(
-                pdfResource,
-                PdfDocumentReaderConfig.builder()
-                        .withPagesPerDocument(1)
-                        .build()
-        ).read();
+    // ── Preview (bez zapisu do Qdrant) ───────────────────────────────────────
 
-        List<Document> chunks = buildSplitter().apply(pages);
+    public List<Map<String, Object>> preview(Resource pdfResource, ChunkingStrategy strategy) {
+        ChunkingResult result = chunkerFactory.get(strategy).chunk(pdfResource);
+        List<Document> chunks = result.chunks();
 
         return chunks.stream()
-                .map(chunk -> Map.<String, Object>of(
-                        "index", chunks.indexOf(chunk),
-                        "length", chunk.getText().length(),
-                        "page", chunk.getMetadata().getOrDefault("page_number", "?"),
-                        "preview", chunk.getText().substring(0, Math.min(200, chunk.getText().length()))
+                .map(c -> Map.<String, Object>of(
+                        "index",    chunks.indexOf(c),
+                        "length",   c.getText().length(),
+                        "page",     c.getMetadata().getOrDefault("page_number", "?"),
+                        "type",     c.getMetadata().getOrDefault("chunk_type", strategy.name().toLowerCase()),
+                        "parentId", c.getMetadata().getOrDefault("parentId", ""),
+                        "preview",  c.getText().substring(0, Math.min(300, c.getText().length()))
                 ))
                 .toList();
     }
 
+    // ── Delete ───────────────────────────────────────────────────────────────
+
     public void delete(String fileName) {
-        vectorStore.delete(
-                List.of("source == '" + fileName + "'")
-        );
+        vectorStore.delete(List.of("source == '" + fileName + "'"));
         log.info("🗑️ Usunięto dokumenty z pliku: {}", fileName);
     }
 
-    private TokenTextSplitter buildSplitter() {
-        var chunking = ragProperties.chunking();
-        return TokenTextSplitter.builder()
-                .withChunkSize(chunking.chunkSize())
-                .withMinChunkSizeChars(chunking.minChunkSize())
-                .withMinChunkLengthToEmbed(5)
-                .withMaxNumChunks(1000)
-                .withKeepSeparator(true)
-                .build();
+    // ── Parent lookup (dla HIERARCHICAL) ─────────────────────────────────────
+
+    public Document getParent(String parentId) {
+        return parentStore.get(parentId);
     }
+
+    // ── Result record ─────────────────────────────────────────────────────────
+
+    public record IngestResult(
+            String file,
+            String strategy,
+            int chunks,
+            long chunkingMs,
+            long embeddingMs,
+            long totalMs
+    ) {}
 }

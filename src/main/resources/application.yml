@@ -29,7 +29,6 @@ spring:
       max-file-size: 50MB
       max-request-size: 50MB
 
-# WÅasne wÅaÅciwoÅci dla RAG (dostÄpne przez @ConfigurationProperties)
 rag:
   chunking:
     chunk-size: ${CHUNK_SIZE:512}

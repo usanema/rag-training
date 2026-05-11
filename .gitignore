@@ -38,3 +38,4 @@ build/
 ### Mac OS ###
 .DS_Store
 .env
+/src/main/resources/pdfs/rfc9205.pdf
