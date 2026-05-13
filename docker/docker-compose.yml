@@ -1,15 +1,101 @@
 services:
+
+  # ── Redis Stack — vector store (Redis + RediSearch) ────────────────────────
+  # redis-stack zawiera moduł RediSearch niezbędny do wyszukiwania wektorowego.
+  # Zwykły Redis NIE obsługuje vector similarity search.
+  redis:
+    image: redis/redis-stack:latest
+    container_name: redis
+    ports:
+      - "6379:6379"   # Redis
+      - "8001:8001"   # Redis Insight (UI)
+    volumes:
+      - redis_storage:/data
+    restart: unless-stopped
+
+  # ── Qdrant — alternatywny vector store ────────────────────────────────────
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant
     ports:
-      - "6333:6333"   # REST API + dashboard
-      - "6334:6334"   # gRPC (Spring AI używa tego)
+      - "6333:6333"   # REST + dashboard
+      - "6334:6334"   # gRPC
     volumes:
       - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  # ── Open WebUI Pipelines — RAG pipeline ───────────────────────────────────
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main
+    container_name: pipelines
+    ports:
+      - "9099:9099"
+    volumes:
+      - ./pipelines:/app/pipelines
     environment:
-      - QDRANT__SERVICE__GRPC_PORT=6334
+      PIPELINES_DIR:        /app/pipelines
+      EMBEDDING_BASE_URL:   ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434/v1}
+      EMBEDDING_API_KEY:    ${EMBEDDING_API_KEY:-local}
+      EMBEDDING_MODEL:      ${EMBEDDING_MODEL:-your-embedding-model}
+      QDRANT_URL:           http://qdrant:6333
+      QDRANT_COLLECTION:    ${QDRANT_COLLECTION:-documents}
+      LLM_BASE_URL:         ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_MODEL:            ${LLM_MODEL:-gemma4:e4b}
+      TOP_K:                "5"
+      SIMILARITY_THRESHOLD: "0.7"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - qdrant
+    restart: unless-stopped
+
+  # ── Open WebUI — główne UI ─────────────────────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3000:8080"
+    environment:
+      OLLAMA_BASE_URL:     http://host.docker.internal:11434
+      OPENAI_API_BASE_URL: http://pipelines:9099
+      OPENAI_API_KEY:      0p3n-w3bu!
+      WEBUI_SECRET_KEY:    ${WEBUI_SECRET_KEY:-change-me-in-production}
+      WEBUI_AUTH:          "false"
+    volumes:
+      - open-webui-data:/app/backend/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - pipelines
+    restart: unless-stopped
+
+  # ── Spring AI — ingestion backend ──────────────────────────────────────────
+  rag-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-backend
+    ports:
+      - "8081:8081"
+    environment:
+      EMBEDDING_API_KEY:  ${EMBEDDING_API_KEY:-local}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434/v1}
+      EMBEDDING_MODEL:    ${EMBEDDING_MODEL:-your-embedding-model}
+      VECTOR_STORE:       ${VECTOR_STORE:-redis}
+      REDIS_HOST:         redis
+      REDIS_PORT:         "6379"
+      REDIS_INDEX:        ${REDIS_INDEX:-documents}
+      QDRANT_HOST:        qdrant
+      QDRANT_PORT:        "6334"
+      QDRANT_COLLECTION:  ${QDRANT_COLLECTION:-documents}
+      SERVER_PORT:        "8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
     restart: unless-stopped
 
 volumes:
+  redis_storage:
   qdrant_storage:
+  open-webui-data:

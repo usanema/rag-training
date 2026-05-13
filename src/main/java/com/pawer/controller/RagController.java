@@ -3,6 +3,7 @@ package com.pawer.controller;
 import com.pawer.chunking.ChunkingStrategy;
 import com.pawer.service.PdfIngestionService;
 import com.pawer.service.RagService;
+import com.pawer.service.VectorStoreRouter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,30 @@ public class RagController {
 
     private final PdfIngestionService ingestionService;
     private final RagService ragService;
+    private final VectorStoreRouter vectorStoreRouter;
+
+    // ── Vector store — odczyt i przełączanie ────────────────────────────────
+
+    @GetMapping("/info")
+    public ResponseEntity<Map<String, Object>> info() {
+        return ResponseEntity.ok(Map.of(
+                "vectorStore", vectorStoreRouter.getActiveStore()
+        ));
+    }
+
+    @GetMapping("/store")
+    public ResponseEntity<Map<String, Object>> getStore() {
+        return ResponseEntity.ok(Map.of(
+                "active",    vectorStoreRouter.getActiveStore(),
+                "available", VectorStoreRouter.AVAILABLE
+        ));
+    }
+
+    @PutMapping("/store/{name}")
+    public ResponseEntity<Map<String, Object>> switchStore(@PathVariable String name) {
+        vectorStoreRouter.switchTo(name);
+        return ResponseEntity.ok(Map.of("active", vectorStoreRouter.getActiveStore()));
+    }
 
     // ── Dostępne strategie ──────────────────────────────────────────────────
     @GetMapping("/strategies")

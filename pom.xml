@@ -17,7 +17,7 @@
 
     <properties>
         <java.version>21</java.version>
-        <spring-ai.version>1.1.5</spring-ai.version>
+        <spring-ai.version>1.1.6</spring-ai.version>
     </properties>
 
     <dependencyManagement>
@@ -51,6 +51,12 @@
             <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
         </dependency>
 
+        <!-- Spring AI — Redis vector store (wymaga Redis Stack z modułem RediSearch) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-vector-store-redis</artifactId>
+        </dependency>
+
         <!-- Spring AI — PDF reader -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
@@ -78,6 +84,13 @@
             <artifactId>dotenv-java</artifactId>
             <version>3.2.0</version>
             <scope>compile</scope>
+        </dependency>
+
+        <!-- gRPC API — wymagane przy ręcznej konfiguracji QdrantGrpcClient (domyślnie runtime) -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-api</artifactId>
+            <version>1.65.1</version>
         </dependency>
     </dependencies>
     <build>
