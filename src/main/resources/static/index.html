@@ -948,7 +948,7 @@
         queryMode === 'stream' ? askStream() : askSync();
     }
 
-    function askStream() {
+    async function askStream() {
         const q = document.getElementById('questionInput').value.trim();
         if (!q) return;
 
@@ -958,18 +958,46 @@
         box.className = 'answer-box loading';
         box.innerHTML = '<span class="cursor"></span>';
 
-        const es = new EventSource(`/api/rag/query/stream?q=${encodeURIComponent(q)}`);
-        let started = false;
+        try {
+            const res = await fetch(`/api/rag/query/stream?q=${encodeURIComponent(q)}`);
+            if (!res.ok || !res.body) {
+                box.className   = 'answer-box';
+                box.textContent = 'Brak odpowiedzi.';
+                return;
+            }
 
-        es.onmessage = e => {
-            if (!started) { box.className = 'answer-box'; box.innerHTML = ''; started = true; }
-            box.textContent += e.data;
-        };
+            const reader  = res.body.getReader();
+            const decoder = new TextDecoder();
+            let started = false;
+            let buffer  = '';
 
-        es.onerror = () => {
-            es.close();
-            if (!started) { box.className = 'answer-box'; box.textContent = 'Brak odpowiedzi.'; }
-        };
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.startsWith('data:')) continue;
+                    if (!started) {
+                        box.className = 'answer-box';
+                        box.textContent = '';
+                        started = true;
+                    }
+                    box.textContent += line.slice(5).trimStart();
+                }
+            }
+
+            if (!started) {
+                box.className   = 'answer-box';
+                box.textContent = 'Brak odpowiedzi.';
+            }
+        } catch (e) {
+            box.className   = 'answer-box';
+            box.textContent = 'Błąd połączenia: ' + e.message;
+        }
     }
 
     async function askSync() {
