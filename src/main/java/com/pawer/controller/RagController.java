@@ -87,8 +87,12 @@ public class RagController {
     // ── Zapytaj (zwykły request) ────────────────────────────────────────────
     @GetMapping("/query")
     public ResponseEntity<Map<String, Object>> query(@RequestParam String q) {
-        String answer = ragService.query(q);
-        return ResponseEntity.ok(Map.of("question", q, "answer", answer));
+        var result = ragService.query(q);
+        return ResponseEntity.ok(Map.of(
+                "question", q,
+                "answer",   result.answer(),
+                "sources",  result.sources()
+        ));
     }
 
     // ── Zapytaj (streaming SSE) ─────────────────────────────────────────────

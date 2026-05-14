@@ -555,6 +555,43 @@
 
         .td-preview { cursor: pointer; }
         .td-preview:hover { color: var(--text); }
+
+        /* ── Sources ────────────────────────────────────────────────────────── */
+
+        .sources-area {
+            margin-top: 12px;
+            display: none;
+        }
+
+        .sources-label {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--muted2);
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .source-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--muted);
+            margin-bottom: 4px;
+            flex-wrap: wrap;
+        }
+
+        .source-file {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        .source-pages {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
     </style>
 </head>
 <body>
@@ -691,6 +728,10 @@
                 <div class="answer-area" id="answerArea">
                     <div class="answer-label">Odpowiedź</div>
                     <div class="answer-box" id="answerBox"></div>
+                    <div class="sources-area" id="sourcesArea">
+                        <div class="sources-label">Źródła</div>
+                        <div id="sourcesList"></div>
+                    </div>
                 </div>
             </div>
 
@@ -957,6 +998,7 @@
         area.style.display = 'block';
         box.className = 'answer-box loading';
         box.innerHTML = '<span class="cursor"></span>';
+        document.getElementById('sourcesArea').style.display = 'none';
 
         try {
             const res = await fetch(`/api/rag/query/stream?q=${encodeURIComponent(q)}`);
@@ -981,12 +1023,17 @@
 
                 for (const line of lines) {
                     if (!line.startsWith('data:')) continue;
+                    const payload = line.slice(5).trimStart();
+                    if (payload.startsWith('__SOURCES__:')) {
+                        renderSources(JSON.parse(payload.slice(12)));
+                        continue;
+                    }
                     if (!started) {
-                        box.className = 'answer-box';
+                        box.className   = 'answer-box';
                         box.textContent = '';
                         started = true;
                     }
-                    box.textContent += line.slice(5).trimStart();
+                    box.textContent += payload;
                 }
             }
 
@@ -1009,16 +1056,47 @@
         area.style.display = 'block';
         box.className = 'answer-box loading';
         box.innerHTML = 'Oczekuję na odpowiedź <span class="cursor"></span>';
+        document.getElementById('sourcesArea').style.display = 'none';
 
         try {
             const res  = await fetch(`/api/rag/query?q=${encodeURIComponent(q)}`);
             const data = await res.json();
             box.className   = 'answer-box';
             box.textContent = data.answer || 'Brak odpowiedzi.';
+            if (data.sources?.length) renderSources(data.sources);
         } catch (e) {
             box.className   = 'answer-box';
             box.textContent = 'Błąd połączenia.';
         }
+    }
+
+    // ── Sources ────────────────────────────────────────────────────────────────
+
+    function renderSources(sources) {
+        if (!sources?.length) return;
+        const list = document.getElementById('sourcesList');
+        list.innerHTML = '';
+        sources.forEach(s => {
+            const row = document.createElement('div');
+            row.className = 'source-row';
+
+            const file = document.createElement('span');
+            file.className   = 'source-file';
+            file.textContent = s.source;
+
+            const pages = document.createElement('div');
+            pages.className = 'source-pages';
+            s.pages.forEach(p => {
+                const pill = document.createElement('span');
+                pill.className   = 'pill';
+                pill.textContent = `s. ${p}`;
+                pages.appendChild(pill);
+            });
+
+            row.append(file, pages);
+            list.appendChild(row);
+        });
+        document.getElementById('sourcesArea').style.display = 'block';
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
