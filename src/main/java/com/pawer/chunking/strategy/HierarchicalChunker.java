@@ -89,9 +89,17 @@ public class HierarchicalChunker implements PdfChunker {
         enrichMetadata(allChildren, pdfResource.getFilename());
         enrichMetadata(new ArrayList<>(parentMap.values()), pdfResource.getFilename());
 
-        log.info("[HIERARCHICAL] {} stron → {} parentów → {} child chunków",
-                pages.size(), parents.size(), allChildren.size());
+        List<Document> normalizedChildren = allChildren.stream()
+                .map(c -> new Document(c.getText().trim().replaceAll("\\s+", " "), c.getMetadata()))
+                .toList();
 
-        return ChunkingResult.ofHierarchical(allChildren, parentMap);
+        Map<String, Document> normalizedParents = new HashMap<>();
+        parentMap.forEach((id, p) ->
+                normalizedParents.put(id, new Document(p.getText().trim().replaceAll("\\s+", " "), p.getMetadata())));
+
+        log.info("[HIERARCHICAL] {} stron → {} parentów → {} child chunków",
+                pages.size(), normalizedParents.size(), normalizedChildren.size());
+
+        return ChunkingResult.ofHierarchical(normalizedChildren, normalizedParents);
     }
 }

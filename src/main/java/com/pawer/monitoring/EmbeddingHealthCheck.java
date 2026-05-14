@@ -17,8 +17,9 @@ public class EmbeddingHealthCheck implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         try {
+            long t0 = System.currentTimeMillis();
             float[] vector = embeddingModel.embed("test");
-            log.info("✅ Lokalny model embeddingowy działa | wymiar wektora: {}", vector.length);
+            log.info("✅ Lokalny model embeddingowy działa | wymiar wektora: {}. Czas odpowiedzi : {}", vector.length, (System.currentTimeMillis() - t0) / 1_000);
         } catch (Exception e) {
             log.error("❌ Brak połączenia z modelem embeddingowym: {}", e.getMessage());
         }

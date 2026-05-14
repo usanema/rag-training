@@ -486,6 +486,75 @@
             vertical-align: middle;
             margin-right: 6px;
         }
+
+        /* ── Chunk modal ────────────────────────────────────────────────────── */
+
+        .modal-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.65);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-backdrop.open { display: flex; }
+
+        .modal {
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: var(--r);
+            width: min(680px, 92vw);
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .modal-header .modal-title {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            line-height: 0;
+        }
+
+        .modal-close:hover { color: var(--text); background: var(--surface2); }
+
+        .modal-close svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+
+        .modal-body {
+            overflow-y: auto;
+            padding: 16px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .td-preview { cursor: pointer; }
+        .td-preview:hover { color: var(--text); }
     </style>
 </head>
 <body>
@@ -629,6 +698,21 @@
     </div>
 </div>
 
+<!-- Chunk modal -->
+<div class="modal-backdrop" id="chunkModal" onclick="closeModal(event)">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">
+                <span id="modalMeta"></span>
+            </div>
+            <button class="modal-close" onclick="closeModalDirect()">
+                <svg viewBox="0 0 16 16"><path d="M3 3l10 10M13 3L3 13"/></svg>
+            </button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+
 <script>
     // ── State ──────────────────────────────────────────────────────────────────
 
@@ -637,6 +721,7 @@
     let selectedFile = null;
     let selectedFile2 = null;
     let queryMode = 'stream';
+    let previewChunks = [];
 
     const topbarTitles = {
         ingest:  { title: 'Indeksowanie',    sub: '— wczytaj i zaindeksuj PDF' },
@@ -793,31 +878,57 @@
         form.append('file', selectedFile2);
         try {
             const res    = await fetch(`/api/rag/preview?strategy=${selectedStrategy}`, { method: 'POST', body: form });
-            const chunks = await res.json();
+            previewChunks = await res.json();
             hideStatus('previewStatus');
 
-            const rows = chunks.map(c => `
-                <tr>
-                    <td style="color: var(--muted); font-size: 11px">${c.index}</td>
-                    <td style="font-size: 11px">${c.page}</td>
-                    <td style="font-size: 11px">${c.length}</td>
-                    <td><span class="pill">${c.type}</span></td>
-                    <td class="td-preview">${escHtml(c.preview)}…</td>
-                </tr>
-            `).join('');
+            const container = document.getElementById('chunksContainer');
 
-            document.getElementById('chunksContainer').innerHTML = `
-                <div style="margin-top: 20px; font-size: 11px; color: var(--muted); margin-bottom: 10px">
-                    ${chunks.length} chunków · strategia: ${selectedStrategy}
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr><th>#</th><th>Strona</th><th>Znaki</th><th>Typ</th><th>Podgląd</th></tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>`;
+            const info = document.createElement('div');
+            info.style.cssText = 'margin-top:20px;font-size:11px;color:var(--muted);margin-bottom:10px';
+            info.textContent = `${previewChunks.length} chunków · strategia: ${selectedStrategy}`;
+
+            const wrap = document.createElement('div');
+            wrap.className = 'table-wrap';
+
+            const table = document.createElement('table');
+            table.innerHTML = '<thead><tr><th>#</th><th>Strona</th><th>Znaki</th><th>Typ</th><th>Podgląd</th></tr></thead>';
+
+            const tbody = document.createElement('tbody');
+            previewChunks.forEach(c => {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('click', () => openModal(c.index));
+
+                const tdIdx     = document.createElement('td');
+                tdIdx.style.cssText = 'color:var(--muted);font-size:11px';
+                tdIdx.textContent = c.index;
+
+                const tdPage    = document.createElement('td');
+                tdPage.style.fontSize = '11px';
+                tdPage.textContent = c.page;
+
+                const tdLen     = document.createElement('td');
+                tdLen.style.fontSize = '11px';
+                tdLen.textContent = c.length;
+
+                const tdType    = document.createElement('td');
+                const pill = document.createElement('span');
+                pill.className = 'pill';
+                pill.textContent = c.type;
+                tdType.appendChild(pill);
+
+                const tdPrev    = document.createElement('td');
+                tdPrev.className = 'td-preview';
+                tdPrev.textContent = c.preview + '…';
+
+                tr.append(tdIdx, tdPage, tdLen, tdType, tdPrev);
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            wrap.appendChild(table);
+            container.innerHTML = '';
+            container.append(info, wrap);
         } catch (e) {
             setStatus('previewStatus', 'Błąd: ' + e.message, 'err');
         } finally {
@@ -897,6 +1008,26 @@
     function escHtml(s) {
         return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
+
+    function openModal(index) {
+        const c = previewChunks[index];
+        document.getElementById('modalMeta').innerHTML =
+            `Chunk <strong>#${index}</strong> &nbsp;·&nbsp; strona <strong>${c.page}</strong> &nbsp;·&nbsp; <span class="pill">${c.type}</span> &nbsp;·&nbsp; ${c.length} znaków`;
+        document.getElementById('modalBody').textContent = c.text;
+        document.getElementById('chunkModal').classList.add('open');
+    }
+
+    function closeModal(e) {
+        if (e.target === document.getElementById('chunkModal')) closeModalDirect();
+    }
+
+    function closeModalDirect() {
+        document.getElementById('chunkModal').classList.remove('open');
+    }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeModalDirect();
+    });
 
     // ── Vector store info ──────────────────────────────────────────────────────
 

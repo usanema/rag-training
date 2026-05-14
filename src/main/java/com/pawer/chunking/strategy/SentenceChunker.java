@@ -49,7 +49,7 @@ public class SentenceChunker implements PdfChunker {
         List<Document> chunks = new ArrayList<>();
 
         for (Document page : pages) {
-            String pageNum = (String) page.getMetadata().getOrDefault("page_number", "?");
+            String pageNum = page.getMetadata().getOrDefault("page_number", "?").toString();
             List<String> sentences = splitIntoSentences(page.getText());
             List<Document> pageChunks = groupSentences(sentences, cfg.chunkSize(), cfg.chunkOverlap(), pageNum);
             chunks.addAll(pageChunks);
@@ -70,7 +70,7 @@ public class SentenceChunker implements PdfChunker {
 
         int start = iterator.first();
         for (int end = iterator.next(); end != BreakIterator.DONE; start = end, end = iterator.next()) {
-            String sentence = text.substring(start, end).trim();
+            String sentence = text.substring(start, end).trim().replaceAll("\\s+", " ");
             if (!sentence.isEmpty()) {
                 sentences.add(sentence);
             }

@@ -76,8 +76,12 @@ public class ParagraphChunker implements PdfChunker {
                                 p.getMetadata().getOrDefault("title", "")))
         );
 
-        log.info("[PARAGRAPH] {} sekcji → {} chunków", paragraphs.size(), chunks.size());
-        return ChunkingResult.of(chunks);
+        List<Document> normalized = chunks.stream()
+                .map(c -> new Document(c.getText().trim().replaceAll("\\s+", " "), c.getMetadata()))
+                .toList();
+
+        log.info("[PARAGRAPH] {} sekcji → {} chunków", paragraphs.size(), normalized.size());
+        return ChunkingResult.of(normalized);
     }
 
     private TokenTextSplitter buildSplitter() {

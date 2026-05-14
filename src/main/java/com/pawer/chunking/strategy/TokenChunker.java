@@ -49,10 +49,14 @@ public class TokenChunker implements PdfChunker {
         List<Document> chunks = splitter.apply(pages);
         enrichMetadata(chunks, pdfResource.getFilename());
 
-        log.info("[TOKEN] {} stron → {} chunków (rozmiar: {} tokenów, overlap: {})",
-                pages.size(), chunks.size(), cfg.chunkSize(), cfg.chunkOverlap());
+        List<Document> normalized = chunks.stream()
+                .map(c -> new Document(c.getText().trim().replaceAll("\\s+", " "), c.getMetadata()))
+                .toList();
 
-        return ChunkingResult.of(chunks);
+        log.info("[TOKEN] {} stron → {} chunków (rozmiar: {} tokenów, overlap: {})",
+                pages.size(), normalized.size(), cfg.chunkSize(), cfg.chunkOverlap());
+
+        return ChunkingResult.of(normalized);
     }
 
     public static TokenTextSplitter buildSplitter(RagProperties.Chunking chunking) {

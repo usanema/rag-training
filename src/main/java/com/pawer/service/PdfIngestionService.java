@@ -73,7 +73,8 @@ public class PdfIngestionService {
                         "page",     c.getMetadata().getOrDefault("page_number", "?"),
                         "type",     c.getMetadata().getOrDefault("chunk_type", strategy.name().toLowerCase()),
                         "parentId", c.getMetadata().getOrDefault("parentId", ""),
-                        "preview",  c.getText().substring(0, Math.min(300, c.getText().length()))
+                        "preview",  c.getText().substring(0, Math.min(300, c.getText().length())),
+                        "text",     c.getText()
                 ))
                 .toList();
     }
