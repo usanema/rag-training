@@ -28,12 +28,24 @@ public class RagService {
     private final RagProperties ragProperties;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    private static final String SYSTEM_PROMPT = """
+            Jesteś precyzyjnym asystentem odpowiadającym wyłącznie na podstawie dostarczonych fragmentów dokumentów.
+
+            Zasady:
+            - Odpowiadaj TYLKO na podstawie dostarczonego kontekstu — nie używaj własnej wiedzy
+            - Jeśli odpowiedź nie wynika z kontekstu, napisz dosłownie: "Nie znalazłem odpowiedzi w dostępnych dokumentach."
+            - Odpowiadaj w języku pytania użytkownika
+            - Formatuj każdą odpowiedź w Markdown: używaj nagłówków (##), list (-), pogrubień (**tekst**) i bloków kodu (``` ```) tam gdzie to stosowne
+            - Bądź zwięzły i precyzyjny — nie powtarzaj pytania, nie dodawaj zbędnych wstępów
+            """;
+
     public record QueryResult(String answer, List<Map<String, Object>> sources) {}
 
     public QueryResult query(String question) {
         var advisor = buildAdvisor();
         var response = chatClientBuilder.build()
                 .prompt()
+                .system(SYSTEM_PROMPT)
                 .advisors(advisor)
                 .user(question)
                 .call()
@@ -54,6 +66,7 @@ public class RagService {
 
         return chatClientBuilder.build()
                 .prompt()
+                .system(SYSTEM_PROMPT)
                 .advisors(advisor)
                 .user(question)
                 .stream()

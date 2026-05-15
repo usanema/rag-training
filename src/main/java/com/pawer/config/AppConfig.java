@@ -61,6 +61,13 @@ public class AppConfig {
                 .indexName(redisIndex)
                 .prefix(redisPrefix)
                 .initializeSchema(true)
+                .metadataFields(
+                        RedisVectorStore.MetadataField.text("source"),
+                        RedisVectorStore.MetadataField.text("page_number"),
+                        RedisVectorStore.MetadataField.text("chunk_type"),
+                        RedisVectorStore.MetadataField.text("parentId"),
+                        RedisVectorStore.MetadataField.text("section_title")
+                )
                 .build();
     }
 

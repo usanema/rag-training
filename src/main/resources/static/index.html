@@ -4,6 +4,7 @@
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>RAG</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         *, *::before, *::after {
             box-sizing: border-box;
@@ -436,6 +437,26 @@
 
         .answer-box.loading { color: var(--muted); }
 
+        .answer-box h1, .answer-box h2, .answer-box h3 {
+            font-size: 13px; font-weight: 600; color: var(--text);
+            margin: 14px 0 6px;
+        }
+        .answer-box h1 { font-size: 14px; }
+        .answer-box p  { margin: 6px 0; }
+        .answer-box ul, .answer-box ol { padding-left: 18px; margin: 6px 0; }
+        .answer-box li { margin: 3px 0; }
+        .answer-box strong { color: var(--text); font-weight: 600; }
+        .answer-box code {
+            background: var(--surface2); border: 1px solid var(--border);
+            border-radius: 4px; padding: 1px 5px; font-size: 12px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+        .answer-box pre {
+            background: var(--surface2); border: 1px solid var(--border);
+            border-radius: var(--r); padding: 12px; overflow-x: auto; margin: 8px 0;
+        }
+        .answer-box pre code { background: none; border: none; padding: 0; font-size: 12px; }
+
         @keyframes cursor-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
         .cursor {
@@ -556,6 +577,66 @@
         .td-preview { cursor: pointer; }
         .td-preview:hover { color: var(--text); }
 
+        /* ── Similarity ─────────────────────────────────────────────────────── */
+
+        .sim-input {
+            width: 100%;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--r);
+            color: var(--text);
+            font-family: inherit;
+            font-size: 14px;
+            padding: 10px 12px;
+            transition: border-color 0.15s;
+        }
+        .sim-input:focus { outline: none; border-color: #555; }
+
+        .sim-score-wrap {
+            display: flex;
+            align-items: baseline;
+            gap: 14px;
+            margin-bottom: 16px;
+        }
+
+        .sim-score {
+            font-size: 48px;
+            font-weight: 300;
+            color: var(--text);
+            letter-spacing: -1px;
+        }
+
+        .sim-label {
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .sim-bar-wrap { margin-top: 4px; }
+
+        .sim-bar-track {
+            height: 6px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .sim-bar-fill {
+            position: absolute;
+            top: 0; bottom: 0;
+            border-radius: 20px;
+            transition: left 0.4s, width 0.4s, background 0.4s;
+        }
+
+        .sim-bar-ticks {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 10px;
+            color: var(--muted2);
+        }
+
         /* ── Sources ────────────────────────────────────────────────────────── */
 
         .sources-area {
@@ -614,6 +695,12 @@
         <div class="nav-item" onclick="nav('preview', this)">
             <svg viewBox="0 0 16 16"><path d="M1.5 8s2.5-5 6.5-5 6.5 5 6.5 5-2.5 5-6.5 5-6.5-5-6.5-5z"/><circle cx="8" cy="8" r="2"/></svg>
             Podgląd chunków
+        </div>
+
+        <div class="sidebar-section" style="margin-top: 8px">Narzędzia</div>
+        <div class="nav-item" onclick="nav('similarity', this)">
+            <svg viewBox="0 0 16 16"><path d="M2 8h3M11 8h3M8 2v3M8 11v3"/><circle cx="8" cy="8" r="2.5"/></svg>
+            Cosine Similarity
         </div>
 
         <div class="sidebar-section" style="margin-top: 8px">Zapytania</div>
@@ -704,6 +791,47 @@
                 <div id="chunksContainer"></div>
             </div>
 
+            <!-- PAGE: SIMILARITY -->
+            <div class="page" id="page-similarity">
+                <div class="section-title">Porównaj embeddingi</div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px">
+                    <div>
+                        <div class="section-title" style="margin-bottom:8px">Tekst A</div>
+                        <input id="simA" type="text" class="sim-input" placeholder="np. king"/>
+                    </div>
+                    <div>
+                        <div class="section-title" style="margin-bottom:8px">Tekst B</div>
+                        <input id="simB" type="text" class="sim-input" placeholder="np. queen"/>
+                    </div>
+                </div>
+
+                <div class="btn-row">
+                    <button class="btn btn-primary" onclick="measureSimilarity()">
+                        <svg viewBox="0 0 16 16"><path d="M2 8h3M11 8h3M8 2v3M8 11v3"/><circle cx="8" cy="8" r="2.5"/></svg>
+                        Oblicz
+                    </button>
+                </div>
+
+                <div class="status" id="simStatus"></div>
+
+                <div id="simResult" style="display:none; margin-top:24px">
+                    <div class="section-title" style="margin-bottom:12px">Wynik</div>
+                    <div class="sim-score-wrap">
+                        <div class="sim-score" id="simScore">—</div>
+                        <div class="sim-label" id="simLabel"></div>
+                    </div>
+                    <div class="sim-bar-wrap">
+                        <div class="sim-bar-track">
+                            <div class="sim-bar-fill" id="simBarFill"></div>
+                        </div>
+                        <div class="sim-bar-ticks">
+                            <span>-1</span><span>-0.5</span><span>0</span><span>0.5</span><span>1</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- PAGE: QUERY -->
             <div class="page" id="page-query">
                 <div class="tabs">
@@ -765,9 +893,10 @@
     let previewChunks = [];
 
     const topbarTitles = {
-        ingest:  { title: 'Indeksowanie',    sub: '— wczytaj i zaindeksuj PDF' },
-        preview: { title: 'Podgląd chunków', sub: '— sprawdź podział przed indeksowaniem' },
-        query:   { title: 'Chat / Query',    sub: '— zadaj pytanie o dokumenty' },
+        ingest:     { title: 'Indeksowanie',      sub: '— wczytaj i zaindeksuj PDF' },
+        preview:    { title: 'Podgląd chunków',   sub: '— sprawdź podział przed indeksowaniem' },
+        similarity: { title: 'Cosine Similarity', sub: '— porównaj embeddingi dwóch tekstów' },
+        query:      { title: 'Chat / Query',      sub: '— zadaj pytanie o dokumenty' },
     };
 
     const speedLabel = {
@@ -1011,15 +1140,16 @@
             const reader  = res.body.getReader();
             const decoder = new TextDecoder();
             let started = false;
-            let buffer  = '';
+            let sseBuffer  = '';
+            let mdBuffer   = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop();
+                sseBuffer += decoder.decode(value, { stream: true });
+                const lines = sseBuffer.split('\n');
+                sseBuffer = lines.pop();
 
                 for (const line of lines) {
                     if (!line.startsWith('data:')) continue;
@@ -1029,11 +1159,11 @@
                         continue;
                     }
                     if (!started) {
-                        box.className   = 'answer-box';
-                        box.textContent = '';
+                        box.className = 'answer-box';
                         started = true;
                     }
-                    box.textContent += payload;
+                    mdBuffer += payload;
+                    box.innerHTML = marked.parse(mdBuffer);
                 }
             }
 
@@ -1061,8 +1191,8 @@
         try {
             const res  = await fetch(`/api/rag/query?q=${encodeURIComponent(q)}`);
             const data = await res.json();
-            box.className   = 'answer-box';
-            box.textContent = data.answer || 'Brak odpowiedzi.';
+            box.className = 'answer-box';
+            box.innerHTML = data.answer ? marked.parse(data.answer) : 'Brak odpowiedzi.';
             if (data.sources?.length) renderSources(data.sources);
         } catch (e) {
             box.className   = 'answer-box';
