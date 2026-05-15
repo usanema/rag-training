@@ -1070,6 +1070,55 @@
         }
     }
 
+    // ── Similarity ─────────────────────────────────────────────────────────────
+
+    async function measureSimilarity() {
+        const a = document.getElementById('simA').value.trim();
+        const b = document.getElementById('simB').value.trim();
+        if (!a || !b) return;
+
+        setStatus('simStatus', '<span class="spinner"></span>Obliczam embeddingi...', 'info');
+        document.getElementById('simResult').style.display = 'none';
+
+        try {
+            const res  = await fetch(`/api/rag/similarity?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
+            const data = await res.json();
+            hideStatus('simStatus');
+            renderSimilarity(data.score);
+        } catch (e) {
+            setStatus('simStatus', 'Błąd: ' + e.message, 'err');
+        }
+    }
+
+    function renderSimilarity(score) {
+        const pct = ((score + 1) / 2) * 100;
+
+        let color, label;
+        if      (score >= 0.9)  { color = '#4caf50'; label = 'Prawie identyczne'; }
+        else if (score >= 0.7)  { color = '#8bc34a'; label = 'Bardzo podobne'; }
+        else if (score >= 0.5)  { color = '#cddc39'; label = 'Podobne'; }
+        else if (score >= 0.2)  { color = '#ffc107'; label = 'Słabo powiązane'; }
+        else if (score >= 0)    { color = '#ff9800'; label = 'Niepowiązane'; }
+        else                    { color = '#f44336'; label = 'Przeciwstawne'; }
+
+        document.getElementById('simScore').textContent = score.toFixed(4);
+        document.getElementById('simLabel').textContent = label;
+
+        const fill = document.getElementById('simBarFill');
+        fill.style.left       = '50%';
+        fill.style.width      = Math.abs(score) / 2 * 100 + '%';
+        fill.style.left       = score >= 0 ? '50%' : (50 + score / 2 * 100) + '%';
+        fill.style.background = color;
+
+        document.getElementById('simResult').style.display = 'block';
+    }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && document.getElementById('page-similarity').classList.contains('active')) {
+            measureSimilarity();
+        }
+    });
+
     // ── Sources ────────────────────────────────────────────────────────────────
 
     function renderSources(sources) {

@@ -5,6 +5,7 @@ import com.pawer.service.PdfIngestionService;
 import com.pawer.service.RagService;
 import com.pawer.service.VectorStoreRouter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +24,7 @@ public class RagController {
     private final PdfIngestionService ingestionService;
     private final RagService ragService;
     private final VectorStoreRouter vectorStoreRouter;
+    private final EmbeddingModel embeddingModel;
 
     // ── Vector store — odczyt i przełączanie ────────────────────────────────
 
@@ -106,6 +108,15 @@ public class RagController {
     public ResponseEntity<Map<String, Object>> delete(@RequestParam String fileName) {
         ingestionService.delete(fileName);
         return ResponseEntity.ok(Map.of("file", fileName, "status", "usunięto"));
+    }
+
+    // ── Cosine similarity dwóch tekstów ────────────────────────────────────
+    @GetMapping("/similarity")
+    public ResponseEntity<Map<String, Object>> similarity(@RequestParam String a, @RequestParam String b) {
+        float[] vecA = embeddingModel.embed(a);
+        float[] vecB = embeddingModel.embed(b);
+        double score = ragService.cosineSimilarity(vecA, vecB);
+        return ResponseEntity.ok(Map.of("a", a, "b", b, "score", score));
     }
 
     // ── Opisy strategii ─────────────────────────────────────────────────────
