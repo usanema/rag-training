@@ -135,6 +135,24 @@ public class RagService {
                 .toList();
     }
 
+    // Zwraca unikalne nazwy plików zaindeksowanych w aktywnym vector store.
+    // Używa szerokiego similarity search z niskim progiem zamiast natywnego listowania,
+    // żeby działać jednolicie z oboma storami (Redis i Qdrant).
+    public List<String> listDocuments() {
+        List<Document> docs = vectorStore.similaritySearch(
+                SearchRequest.builder()
+                        .query("dokument")
+                        .topK(1000)
+                        .similarityThreshold(0.0)
+                        .build());
+        return docs.stream()
+                .map(d -> d.getMetadata().getOrDefault("source", "unknown").toString())
+                .filter(s -> !s.equals("unknown"))
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
     public static double cosineSimilarity(float[] vectorA, float[] vectorB) {
         double dotProduct = 0.0;
         double normA = 0.0;

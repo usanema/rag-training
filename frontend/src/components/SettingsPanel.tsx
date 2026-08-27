@@ -6,6 +6,7 @@ interface Props {
   onClose: () => void
   activeStore: string
   onStoreChange: (store: string) => void
+  onIngest: () => void
 }
 
 const STORES = ['redis', 'qdrant']
@@ -14,7 +15,7 @@ const SPEED: Record<string, string> = {
   HIERARCHICAL: 'medium', SEMANTIC: 'slow',
 }
 
-export default function SettingsPanel({ open, onClose, activeStore, onStoreChange }: Props) {
+export default function SettingsPanel({ open, onClose, activeStore, onStoreChange, onIngest }: Props) {
   const [strategies, setStrategies] = useState<ChunkingStrategy[]>([])
   const [selectedStrategy, setSelectedStrategy] = useState('TOKEN')
   const [file, setFile] = useState<File | null>(null)
@@ -52,7 +53,7 @@ export default function SettingsPanel({ open, onClose, activeStore, onStoreChang
     try {
       const res = await fetch(`/api/rag/ingest?strategy=${selectedStrategy}`, { method: 'POST', body: form })
       const data = await res.json()
-      if (res.ok) setIngestResult(data)
+      if (res.ok) { setIngestResult(data); onIngest() }
       else setIngestError(data.error ?? 'Błąd serwera')
     } catch (e: any) {
       setIngestError(e.message)

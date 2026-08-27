@@ -1,23 +1,36 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useChat } from './hooks/useChat'
 import ChatMessage from './components/ChatMessage'
 import ChatInput from './components/ChatInput'
 import SettingsPanel from './components/SettingsPanel'
+import DocumentList from './components/DocumentList'
 import './App.css'
 
 export default function App() {
   const { messages, streaming, sendMessage, clearHistory } = useChat()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [activeStore, setActiveStore] = useState('redis')
+  const [documents, setDocuments] = useState<string[]>([])
+  const [docsLoading, setDocsLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Załaduj aktywny store z backendu przy starcie
+  const refreshDocuments = useCallback(() => {
+    setDocsLoading(true)
+    fetch('/api/rag/documents')
+      .then(r => r.json())
+      .then((d: string[]) => setDocuments(d))
+      .catch(() => {})
+      .finally(() => setDocsLoading(false))
+  }, [])
+
+  // Załaduj aktywny store i listę dokumentów przy starcie
   useEffect(() => {
     fetch('/api/rag/store')
       .then(r => r.json())
       .then(d => setActiveStore(d.active))
       .catch(() => {})
-  }, [])
+    refreshDocuments()
+  }, [refreshDocuments])
 
   // Przewijaj na dół po każdej nowej wiadomości
   useEffect(() => {
@@ -38,7 +51,13 @@ export default function App() {
           <span>RAG Studio</span>
         </div>
 
-        <div className="sidebar-spacer" />
+        <div className="sidebar-docs">
+          <DocumentList
+            documents={documents}
+            loading={docsLoading}
+            onRefresh={refreshDocuments}
+          />
+        </div>
 
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={clearHistory}>
@@ -91,6 +110,7 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         activeStore={activeStore}
         onStoreChange={setActiveStore}
+        onIngest={refreshDocuments}
       />
     </div>
   )

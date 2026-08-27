@@ -65,8 +65,108 @@
   letter-spacing: 0.01em;
 }
 
-.sidebar-spacer {
+.sidebar-docs {
   flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Document list ──────────────────────────────────────────────────────────── */
+
+.doc-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.doc-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 6px;
+}
+
+.doc-list-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted2);
+}
+
+.doc-refresh-btn {
+  background: none;
+  border: none;
+  color: var(--muted2);
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.doc-refresh-btn:hover:not(:disabled) {
+  color: var(--muted);
+}
+
+.doc-refresh-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.doc-refresh-btn .spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.doc-empty {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--muted2);
+  font-style: italic;
+}
+
+.doc-items {
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+  padding: 0 8px 8px;
+}
+
+.doc-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background 0.12s, color 0.12s;
+}
+
+.doc-item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.doc-item svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--muted2);
+}
+
+.doc-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-bottom {

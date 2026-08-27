@@ -86,6 +86,12 @@ public class RagController {
         return ResponseEntity.ok(ingestionService.preview(file.getResource(), strategy));
     }
 
+    // ── Lista zaindeksowanych dokumentów ───────────────────────────────────
+    @GetMapping("/documents")
+    public ResponseEntity<List<String>> documents() {
+        return ResponseEntity.ok(ragService.listDocuments());
+    }
+
     // ── Zapytaj (zwykły request) ────────────────────────────────────────────
     @GetMapping("/query")
     public ResponseEntity<Map<String, Object>> query(
