@@ -16,7 +16,6 @@ import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Service
@@ -65,9 +64,26 @@ public class RagService {
     }
 
     public Flux<String> query_stream(String question, String conversationId) {
-        AtomicBoolean sourcesSent = new AtomicBoolean(false);
+        // W Spring AI 2.0.1 streaming advisor nie przenosi kontekstu (qa_retrieved_documents)
+        // do ChatClientResponse — pobieramy dokumenty bezpośrednio z VectorStore przed streamem.
+        var search = ragProperties.search();
+        List<Document> docs = vectorStore.similaritySearch(
+                SearchRequest.builder()
+                        .query(question)
+                        .topK(search.topK())
+                        .similarityThreshold(search.similarityThreshold())
+                        .build());
 
-        return chatClientBuilder.build()
+        Flux<String> sourcesFlux = Flux.defer(() -> {
+            try {
+                String json = objectMapper.writeValueAsString(buildSources(docs));
+                return Flux.just("__SOURCES__:" + json);
+            } catch (Exception ignored) {
+                return Flux.empty();
+            }
+        });
+
+        Flux<String> textFlux = chatClientBuilder.build()
                 .prompt()
                 .system(SYSTEM_PROMPT)
                 .advisors(a -> a.param(CONVERSATION_ID_KEY, conversationId))
@@ -75,30 +91,11 @@ public class RagService {
                 .user(question)
                 .stream()
                 .chatResponse()
-                .flatMap(response -> {
-                    var parts = new java.util.ArrayList<Flux<String>>();
+                .mapNotNull(response -> response.getResult() != null
+                        ? response.getResult().getOutput().getText() : null)
+                .filter(text -> !text.isEmpty());
 
-                    if (!sourcesSent.get()) {
-                        @SuppressWarnings("unchecked")
-                        List<Document> docs = (List<Document>) response.getMetadata()
-                                .get(QuestionAnswerAdvisor.RETRIEVED_DOCUMENTS);
-                        if (docs != null) {
-                            sourcesSent.set(true);
-                            try {
-                                String json = objectMapper.writeValueAsString(buildSources(docs));
-                                parts.add(Flux.just("__SOURCES__:" + json));
-                            } catch (Exception ignored) {}
-                        }
-                    }
-
-                    String text = response.getResult() != null
-                            ? response.getResult().getOutput().getText() : null;
-                    if (text != null && !text.isEmpty()) {
-                        parts.add(Flux.just(text));
-                    }
-
-                    return parts.isEmpty() ? Flux.empty() : Flux.concat(parts);
-                });
+        return Flux.concat(sourcesFlux, textFlux);
     }
 
     // conversationId izoluje historię per wątek chatu — różne wątki nie widzą swoich wiadomości.
