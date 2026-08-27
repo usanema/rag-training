@@ -1,12 +1,13 @@
 package com.pawer.service;
 
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawer.config.RagProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -26,27 +27,30 @@ public class RagService {
     private final VectorStore vectorStore;
     private final ChatClient.Builder chatClientBuilder;
     private final RagProperties ragProperties;
+    private final ChatMemory chatMemory;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String SYSTEM_PROMPT = """
-            Jesteś precyzyjnym asystentem odpowiadającym wyłącznie na podstawie dostarczonych fragmentów dokumentów.
+            Jesteś precyzyjnym asystentem odpowiadającym na podstawie dostarczonych fragmentów dokumentów
+            oraz historii rozmowy.
 
             Zasady:
-            - Odpowiadaj TYLKO na podstawie dostarczonego kontekstu — nie używaj własnej wiedzy
-            - Jeśli odpowiedź nie wynika z kontekstu, napisz dosłownie: "Nie znalazłem odpowiedzi w dostępnych dokumentach."
+            - Jeśli pytanie dotyczy dokumentów — odpowiadaj TYLKO na podstawie dostarczonego kontekstu RAG
+            - Jeśli pytanie nawiązuje do poprzednich wiadomości (np. "a co z tym?", "rozwiń punkt 2") — korzystaj z historii rozmowy
+            - Jeśli odpowiedź nie wynika ani z kontekstu ani z historii, napisz: "Nie znalazłem odpowiedzi w dostępnych dokumentach."
             - Odpowiadaj w języku pytania użytkownika
-            - Formatuj każdą odpowiedź w Markdown: używaj nagłówków (##), list (-), pogrubień (**tekst**) i bloków kodu (``` ```) tam gdzie to stosowne
-            - Bądź zwięzły i precyzyjny — nie powtarzaj pytania, nie dodawaj zbędnych wstępów
+            - Formatuj odpowiedzi w Markdown: nagłówki (##), listy (-), pogrubienia (**tekst**), bloki kodu (``` ```)
+            - Bądź zwięzły i precyzyjny
             """;
 
     public record QueryResult(String answer, List<Map<String, Object>> sources) {}
 
-    public QueryResult query(String question) {
-        var advisor = buildAdvisor();
+    public QueryResult query(String question, String conversationId) {
         var response = chatClientBuilder.build()
                 .prompt()
                 .system(SYSTEM_PROMPT)
-                .advisors(advisor)
+                .advisors(a -> a.param(CONVERSATION_ID_KEY, conversationId))
+                .advisors(buildMemoryAdvisor(), buildRagAdvisor())
                 .user(question)
                 .call()
                 .chatResponse();
@@ -60,14 +64,14 @@ public class RagService {
         return new QueryResult(answer, buildSources(docs));
     }
 
-    public Flux<String> query_stream(String question) {
-        var advisor = buildAdvisor();
+    public Flux<String> query_stream(String question, String conversationId) {
         AtomicBoolean sourcesSent = new AtomicBoolean(false);
 
         return chatClientBuilder.build()
                 .prompt()
                 .system(SYSTEM_PROMPT)
-                .advisors(advisor)
+                .advisors(a -> a.param(CONVERSATION_ID_KEY, conversationId))
+                .advisors(buildMemoryAdvisor(), buildRagAdvisor())
                 .user(question)
                 .stream()
                 .chatResponse()
@@ -97,7 +101,16 @@ public class RagService {
                 });
     }
 
-    private QuestionAnswerAdvisor buildAdvisor() {
+    // conversationId izoluje historię per wątek chatu — różne wątki nie widzą swoich wiadomości.
+    // W Spring AI 2.0.1 ID przekazywany jest przez param "chat_memory_conversation_id",
+    // a nie przez builder — advisor odczytuje go z kontekstu żądania.
+    private static final String CONVERSATION_ID_KEY = "chat_memory_conversation_id";
+
+    private MessageChatMemoryAdvisor buildMemoryAdvisor() {
+        return MessageChatMemoryAdvisor.builder(chatMemory).build();
+    }
+
+    private QuestionAnswerAdvisor buildRagAdvisor() {
         var search = ragProperties.search();
         return QuestionAnswerAdvisor.builder(vectorStore)
                 .searchRequest(SearchRequest.builder()
@@ -120,10 +133,11 @@ public class RagService {
                 .entrySet().stream()
                 .map(e -> Map.<String, Object>of(
                         "source", e.getKey(),
-                        "pages",  e.getValue().stream().distinct().sorted().toList()
+                        "pages", e.getValue().stream().distinct().sorted().toList()
                 ))
                 .toList();
     }
+
     public static double cosineSimilarity(float[] vectorA, float[] vectorB) {
         double dotProduct = 0.0;
         double normA = 0.0;

@@ -88,8 +88,10 @@ public class RagController {
 
     // ── Zapytaj (zwykły request) ────────────────────────────────────────────
     @GetMapping("/query")
-    public ResponseEntity<Map<String, Object>> query(@RequestParam String q) {
-        var result = ragService.query(q);
+    public ResponseEntity<Map<String, Object>> query(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "default") String conversationId) {
+        var result = ragService.query(q, conversationId);
         return ResponseEntity.ok(Map.of(
                 "question", q,
                 "answer",   result.answer(),
@@ -99,8 +101,10 @@ public class RagController {
 
     // ── Zapytaj (streaming SSE) ─────────────────────────────────────────────
     @GetMapping(value = "/query/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> queryStream(@RequestParam String q) {
-        return ragService.query_stream(q);
+    public Flux<String> queryStream(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "default") String conversationId) {
+        return ragService.query_stream(q, conversationId);
     }
 
     // ── Usuń dokumenty po nazwie pliku ──────────────────────────────────────

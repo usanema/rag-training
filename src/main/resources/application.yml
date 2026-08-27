@@ -1,4 +1,6 @@
 spring:
+  main:
+    allow-bean-definition-overriding: true
   # Oba auto-configure wykluczone globalnie — beany konfigurujemy ręcznie w AppConfig
   autoconfigure:
     exclude:
@@ -16,6 +18,7 @@ spring:
         base-url: ${EMBEDDING_BASE_URL:http://localhost:8080}
         options:
           model: ${EMBEDDING_MODEL:your-model-name}
+          encoding-format: float
   servlet:
     multipart:
       max-file-size: 50MB

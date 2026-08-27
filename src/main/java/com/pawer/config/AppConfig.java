@@ -3,6 +3,9 @@ package com.pawer.config;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.qdrant.QdrantVectorStore;
@@ -12,7 +15,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
-import redis.clients.jedis.JedisPooled;
+import redis.clients.jedis.RedisClient;
 
 @Slf4j
 @Configuration
@@ -48,6 +51,21 @@ public class AppConfig {
     private boolean qdrantTls;
 
     // ── Beans ────────────────────────────────────────────────────────────────
+
+    // MessageWindowChatMemory przechowuje historię rozmów per conversationId.
+    // InMemoryChatMemoryRepository to magazyn — jak Map<conversationId, List<Message>>.
+    // maxMessages=20 = max 20 ostatnich wiadomości w kontekście (nie wysyłamy całej historii do LLM).
+    @Bean
+    public ChatMemory chatMemory() {
+        return MessageWindowChatMemory.builder()
+                .chatMemoryRepository(new InMemoryChatMemoryRepository())
+                .maxMessages(20)
+                .build();
+    }
+
+    // EmbeddingModel pochodzi teraz z autoconfiguration (spring.ai.openai.embedding.*).
+    // Oba vector store przyjmują go przez wstrzyknięcie.
+
     // @Lazy = bean tworzony dopiero przy pierwszym użyciu (analogia: lazy loading w JPA).
     // Dzięki temu aplikacja startuje bez podłączania do baz danych — połączenie
     // nawiązywane jest dopiero gdy użytkownik wykona pierwszą operację na danym store.
@@ -56,7 +74,7 @@ public class AppConfig {
     @Bean("redisVectorStore")
     public VectorStore redisVectorStore(EmbeddingModel embeddingModel) {
         log.info("Inicjalizacja RedisVectorStore → {}:{}", redisHost, redisPort);
-        JedisPooled jedis = new JedisPooled(redisHost, redisPort);
+        RedisClient jedis = RedisClient.create(redisHost, redisPort);
         return RedisVectorStore.builder(jedis, embeddingModel)
                 .indexName(redisIndex)
                 .prefix(redisPrefix)
