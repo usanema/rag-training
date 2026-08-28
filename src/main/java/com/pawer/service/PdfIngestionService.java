@@ -21,6 +21,7 @@ public class PdfIngestionService {
 
     private final VectorStore vectorStore;
     private final ChunkerFactory chunkerFactory;
+    private final DocumentCatalogService documentCatalogService;
 
     // parentId -> Document — przechowywane w pamięci dla strategii HIERARCHICAL
     private final Map<String, Document> parentStore = new ConcurrentHashMap<>();
@@ -44,6 +45,8 @@ public class PdfIngestionService {
         long t2 = System.currentTimeMillis();
         vectorStore.add(result.chunks());
         long embeddingMs = System.currentTimeMillis() - t2;
+
+        documentCatalogService.generateAndStore(pdfResource.getFilename(), result.chunks());
 
         long totalMs = System.currentTimeMillis() - start;
 
@@ -83,6 +86,7 @@ public class PdfIngestionService {
 
     public void delete(String fileName) {
         vectorStore.delete(List.of("source == '" + fileName + "'"));
+        documentCatalogService.remove(fileName);
         log.info("🗑️ Usunięto dokumenty z pliku: {}", fileName);
     }
 

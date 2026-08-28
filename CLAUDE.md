@@ -96,35 +96,40 @@ src/main/java/com/pawer/
 ### SSE — format eventów
 Spring wysyła `data:{token}\n\n` bez dodatkowej spacji. Token z początkową spacją (granica słowa) przychodzi jako `data: word`. Parsowanie: `l.slice(5)` — **bez** `.replace(/^ /, '')`, bo ta spacja to content, nie artefakt protokołu SSE.
 
-## Routing zapytań — Google ADK
+## Routing zapytań — Google ADK (Agentic RAG)
 
 `RagService` ma dwa pipeline'y przełączane flagą `rag.routing.enabled`:
 
 ### ADK pipeline (domyślny)
 
 ```
-User query → InMemoryRunner → LlmAgent (SpringAI adapter → ChatModel → OpenRouter)
-                                  ↓ agent decyduje
+User query → InMemoryRunner → LlmAgent (SpringAI → ChatModel → OpenRouter)
+                                  ↓ agent decyduje (może wywołać tool wielokrotnie)
                     [wywołuje RagTool]          [nie wywołuje]
                     VectorStore.search()         odpowiedź ogólna
+                    sources → sessionSources[]
+                    return Map("context", ...)   
                     → SSE: __SOURCES__:[...]     → SSE: __SOURCES__:[{source:"(no rag)"}]
                     → SSE: tokeny tekstu...      → SSE: tokeny tekstu...
 ```
 
 **Kluczowe klasy:**
-- `RagTool` — `@Component`, metoda instancyjna `ragSearch(String query)` z adnotacją `@Annotations.Schema`. Zwraca `Map<String,Object>` z `context` (tekst dla agenta) i `sources_json` (JSON dla SSE). `FunctionTool.create(this, "ragSearch")` rejestruje ją jako ADK tool.
-- `AdkAgentConfig` — `LlmAgent.builder().model(new SpringAI(chatModel)).tools(ragTool.toFunctionTool()).build()` + `InMemoryRunner(agent, "rag-studio")`
+- `RagTool` — `@Component`, instancyjna `ragSearch(query, toolContext)`. ADK wstrzykuje `ToolContext` gdy parametr ma `@Schema(name="toolContext")` — wykluczone z function schema. `sessionId = toolContext.sessionId()` — przechowuje sources per sesja w `ConcurrentHashMap`. Zwraca `Map.of("context", text)` dla LLM. `FunctionTool.create(this, "ragSearch")`.
+- `AdkAgentConfig` — eksponuje `InMemorySessionService` i `InMemoryArtifactService` jako beany (współdzielone, sesje przeżywają między requestami). Dostarcza `buildRunner(chatModel, ragTool, sessionService, artifactService, catalog)` — tworzy `LlmAgent` z dynamiczną instrukcją + `Runner(agent, appName, artifactService, sessionService)`. **Brak beanów `LlmAgent` i `InMemoryRunner`** — tworzone per-query.
+- `DocumentCatalogService` — Redis HASH `doc:catalog` (JedisPooled). Przy ingeście: generuje 2-3 zdaniowe summary (LLM, pierwsze 3 chunki) i zapisuje `HSET doc:catalog filename summary`. Przy delete: `HDEL`. `loadCatalog()` → HGETALL.
+- `RagService.buildRunner()` — ładuje katalog z Redis, wywołuje `AdkAgentConfig.buildRunner()` z aktualnym katalogiem. Wywoływane per-query.
+- `RagService.adkStream()` — po pierwszym tokenie tekstu wywołuje `ragTool.pollSources(conversationId)` → emituje `__SOURCES__:[...]`.
 
 **Ważne niuanse ADK 1.8.0:**
-- `FunctionTool.create(Object instance, String methodName)` — metoda może być instancyjna (nie musi być `static`), więc Spring DI działa normalnie
-- `@com.google.adk.tools.Annotations.Schema(name, description)` — na metodzie i parametrach
-- `SpringAI(ChatModel)` z `google-adk-spring-ai` — adapter bez LangChain4j; reużywa istniejący `ChatModel` bean skonfigurowany pod OpenRouter
-- `Content.fromParts(Part.fromText(question))` — tak tworzy się wiadomość wejściową dla `runner.runAsync()`
-- `RunConfig.builder().streamingMode(RunConfig.StreamingMode.SSE).build()` — streaming mode
-- `Event.content().map(Content::text)` — ekstrakcja tokenu tekstu z eventu
-- `Part.functionResponse()` → `Optional<FunctionResponse>` → `.response()` → `Optional<Map<String,Object>>` — tak odczytujemy wynik tool call z event stream
-- `InMemoryRunner` zarządza sesjami wewnętrznie — brak potrzeby ręcznego `InMemorySessionService`
-- Guava `-android` nie ma `ImmutableList.toImmutableList()` — pin na `-jre` w `dependencyManagement`
+- `FunctionTool.create(Object instance, String methodName)` — metoda instancyjna OK, Spring DI działa normalnie
+- **`ToolContext` injection** — parametr named `"toolContext"` (przez `@Schema(name="toolContext")` lub flagę `-parameters`) jest automatycznie wstrzykiwany przez `FunctionTool.buildArguments()` i **wykluczany z function schema** (LLM go nie widzi). `ToolContext.sessionId()` → ID aktywnej sesji.
+- **Multi-step retrieval** — agent może wywołać `rag_search` wielokrotnie; `ConcurrentHashMap.compute()` akumuluje sources per sesja.
+- **Session management** — `InMemoryRunner` NIE tworzy sesji automatycznie. `ensureSession()` w `RagService` wywołuje `sessionService().getSession()` → jeśli null, tworzy nową przez `createSession()`.
+- `Content.fromParts(Part.fromText(question))` — wiadomość wejściowa dla `runner.runAsync()`
+- `RunConfig.StreamingMode.SSE` — streaming events; **partial=true tylko przy generowaniu tekstu**, NIE przy tool calls (tool calls to pełne, synchroniczne eventy)
+- `SpringAI(ChatModel)` — adapter `google-adk-spring-ai` bez LangChain4j; reużywa `ChatModel` bean
+- Guava `-android` nie ma `ImmutableList.toImmutableList()` — pin na `33.4.8-jre` w `dependencyManagement`
+- `RedisVectorStore.MetadataField.numeric("page_number")` — Spring AI PDF reader zapisuje `page_number` jako `int`, schema musi być `NUMERIC` (nie `TEXT`)
 
 ### Legacy pipeline (fallback)
 

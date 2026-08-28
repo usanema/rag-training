@@ -15,6 +15,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
+import redis.clients.jedis.JedisPooled;
 import redis.clients.jedis.RedisClient;
 
 @Slf4j
@@ -52,6 +53,13 @@ public class AppConfig {
 
     // ── Beans ────────────────────────────────────────────────────────────────
 
+    // JedisPooled udostępnia pełne API Redis (HASH, STRING, ...) z connection pool.
+    // Używany przez DocumentCatalogService do operacji na doc:catalog.
+    @Bean
+    public JedisPooled jedisPooled() {
+        return new JedisPooled(redisHost, redisPort);
+    }
+
     // MessageWindowChatMemory przechowuje historię rozmów per conversationId.
     // InMemoryChatMemoryRepository to magazyn — jak Map<conversationId, List<Message>>.
     // maxMessages=20 = max 20 ostatnich wiadomości w kontekście (nie wysyłamy całej historii do LLM).
@@ -81,7 +89,7 @@ public class AppConfig {
                 .initializeSchema(true)
                 .metadataFields(
                         RedisVectorStore.MetadataField.text("source"),
-                        RedisVectorStore.MetadataField.text("page_number"),
+                        RedisVectorStore.MetadataField.numeric("page_number"),
                         RedisVectorStore.MetadataField.text("chunk_type"),
                         RedisVectorStore.MetadataField.text("parentId"),
                         RedisVectorStore.MetadataField.text("section_title")
