@@ -34,8 +34,10 @@ public class AdkAgentConfig {
                 .build();
     }
 
+    public static final String APP_NAME = "rag-studio";
+
     @Bean
     public InMemoryRunner adkRunner(LlmAgent ragLlmAgent) {
-        return new InMemoryRunner(ragLlmAgent, "rag-studio");
+        return new InMemoryRunner(ragLlmAgent, APP_NAME);
     }
 }

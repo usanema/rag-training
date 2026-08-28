@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.adk.agents.RunConfig;
 import com.google.adk.events.Event;
 import com.google.adk.runner.InMemoryRunner;
+import com.pawer.routing.AdkAgentConfig;
 import com.google.genai.types.Content;
 import com.google.genai.types.FunctionResponse;
 import com.google.genai.types.Part;
@@ -24,6 +25,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -41,6 +43,7 @@ public class RagService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String USER_ID = "rag-studio-user";
+    private static final String APP_NAME = AdkAgentConfig.APP_NAME;
 
     private static final String LEGACY_SYSTEM_PROMPT = """
             Jesteś precyzyjnym asystentem odpowiadającym na podstawie dostarczonych fragmentów dokumentów
@@ -83,7 +86,25 @@ public class RagService {
 
     // ── ADK pipeline ────────────────────────────────────────────────────────
 
+    // InMemoryRunner nie tworzy sesji automatycznie — wywołujemy createSession przy pierwszym
+    // zapytaniu dla danego conversationId; jeśli sesja już istnieje, ignorujemy błąd.
+    private void ensureSession(String conversationId) {
+        try {
+            var existing = adkRunner.sessionService()
+                    .getSession(APP_NAME, USER_ID, conversationId, Optional.empty())
+                    .blockingGet();
+            if (existing == null) {
+                adkRunner.sessionService()
+                        .createSession(APP_NAME, USER_ID, new ConcurrentHashMap<>(), conversationId)
+                        .blockingGet();
+            }
+        } catch (Exception e) {
+            log.debug("Session check/create for {}: {}", conversationId, e.getMessage());
+        }
+    }
+
     private QueryResult adkQuery(String question, String conversationId) {
+        ensureSession(conversationId);
         Content userContent = Content.fromParts(Part.fromText(question));
         RunConfig runConfig = RunConfig.builder()
                 .streamingMode(RunConfig.StreamingMode.NONE)
@@ -106,6 +127,7 @@ public class RagService {
     }
 
     private Flux<String> adkStream(String question, String conversationId) {
+        ensureSession(conversationId);
         Content userContent = Content.fromParts(Part.fromText(question));
         RunConfig runConfig = RunConfig.builder()
                 .streamingMode(RunConfig.StreamingMode.SSE)
