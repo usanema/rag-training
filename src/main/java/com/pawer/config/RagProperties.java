@@ -5,7 +5,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "rag")
 public record RagProperties(
         Chunking chunking,
-        Search search
+        Search search,
+        Routing routing
 ) {
     public record Chunking(
             int chunkSize,
@@ -16,5 +17,9 @@ public record RagProperties(
     public record Search(
             int topK,
             double similarityThreshold
+    ) {}
+
+    public record Routing(
+            boolean enabled
     ) {}
 }

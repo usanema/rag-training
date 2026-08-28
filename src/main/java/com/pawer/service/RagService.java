@@ -1,6 +1,12 @@
 package com.pawer.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.adk.agents.RunConfig;
+import com.google.adk.events.Event;
+import com.google.adk.runner.InMemoryRunner;
+import com.google.genai.types.Content;
+import com.google.genai.types.FunctionResponse;
+import com.google.genai.types.Part;
 import com.pawer.config.RagProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,8 +20,12 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,9 +37,12 @@ public class RagService {
     private final ChatClient.Builder chatClientBuilder;
     private final RagProperties ragProperties;
     private final ChatMemory chatMemory;
+    private final InMemoryRunner adkRunner;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private static final String SYSTEM_PROMPT = """
+    private static final String USER_ID = "rag-studio-user";
+
+    private static final String LEGACY_SYSTEM_PROMPT = """
             Jesteś precyzyjnym asystentem odpowiadającym na podstawie dostarczonych fragmentów dokumentów
             oraz historii rozmowy.
 
@@ -44,10 +57,125 @@ public class RagService {
 
     public record QueryResult(String answer, List<Map<String, Object>> sources) {}
 
+    // ── Public API ──────────────────────────────────────────────────────────
+
     public QueryResult query(String question, String conversationId) {
+        if (ragProperties.routing().enabled()) {
+            try {
+                return adkQuery(question, conversationId);
+            } catch (Exception e) {
+                log.warn("ADK routing failed, falling back to legacy pipeline: {}", e.getMessage());
+            }
+        }
+        return legacyQuery(question, conversationId);
+    }
+
+    public Flux<String> query_stream(String question, String conversationId) {
+        if (ragProperties.routing().enabled()) {
+            return adkStream(question, conversationId)
+                    .onErrorResume(e -> {
+                        log.warn("ADK routing failed, falling back to legacy pipeline: {}", e.getMessage());
+                        return legacyStream(question, conversationId);
+                    });
+        }
+        return legacyStream(question, conversationId);
+    }
+
+    // ── ADK pipeline ────────────────────────────────────────────────────────
+
+    private QueryResult adkQuery(String question, String conversationId) {
+        Content userContent = Content.fromParts(Part.fromText(question));
+        RunConfig runConfig = RunConfig.builder()
+                .streamingMode(RunConfig.StreamingMode.NONE)
+                .build();
+
+        List<Event> events = adkRunner
+                .runAsync(USER_ID, conversationId, userContent, runConfig)
+                .toList()
+                .blockingGet();
+
+        String answer = events.stream()
+                .filter(Event::finalResponse)
+                .findFirst()
+                .flatMap(Event::content)
+                .map(Content::text)
+                .orElse("");
+
+        List<Map<String, Object>> sources = extractSourcesFromEvents(events);
+        return new QueryResult(answer, sources);
+    }
+
+    private Flux<String> adkStream(String question, String conversationId) {
+        Content userContent = Content.fromParts(Part.fromText(question));
+        RunConfig runConfig = RunConfig.builder()
+                .streamingMode(RunConfig.StreamingMode.SSE)
+                .build();
+
+        AtomicBoolean sourcesSent = new AtomicBoolean(false);
+        AtomicReference<String> sourcesJsonRef = new AtomicReference<>("[{\"source\":\"(no rag)\",\"pages\":[]}]");
+
+        return Flux.from(adkRunner.runAsync(USER_ID, conversationId, userContent, runConfig))
+                .concatMap(event -> {
+                    // Capture sources_json when tool response arrives
+                    extractSourcesJsonFromEvent(event).ifPresent(sourcesJsonRef::set);
+
+                    // Extract text token (Content.text() concatenates all text parts)
+                    String token = event.content().map(Content::text).orElse("");
+                    if (token.isEmpty()) return Flux.empty();
+
+                    // Emit __SOURCES__ before the very first text token
+                    if (sourcesSent.compareAndSet(false, true)) {
+                        return Flux.just("__SOURCES__:" + sourcesJsonRef.get(), token);
+                    }
+                    return Flux.just(token);
+                })
+                .concatWith(Flux.defer(() -> {
+                    if (sourcesSent.compareAndSet(false, true)) {
+                        return Flux.just("__SOURCES__:" + sourcesJsonRef.get());
+                    }
+                    return Flux.empty();
+                }));
+    }
+
+    // ── Event helpers ────────────────────────────────────────────────────────
+
+    private Optional<String> extractSourcesJsonFromEvent(Event event) {
+        return event.content()
+                .flatMap(Content::parts)
+                .stream()
+                .flatMap(Collection::stream)
+                .flatMap(p -> p.functionResponse().stream())
+                .filter(fr -> "rag_search".equals(fr.name().orElse("")))
+                .findFirst()
+                .flatMap(FunctionResponse::response)
+                .map(r -> String.valueOf(r.getOrDefault("sources_json", "[]")));
+    }
+
+    private List<Map<String, Object>> extractSourcesFromEvents(List<Event> events) {
+        return events.stream()
+                .flatMap(e -> e.content().flatMap(Content::parts).stream().flatMap(Collection::stream))
+                .flatMap(p -> p.functionResponse().stream())
+                .filter(fr -> "rag_search".equals(fr.name().orElse("")))
+                .findFirst()
+                .flatMap(FunctionResponse::response)
+                .map(r -> {
+                    try {
+                        String json = String.valueOf(r.getOrDefault("sources_json", "[]"));
+                        return objectMapper.<List<Map<String, Object>>>readValue(json,
+                                objectMapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+                    } catch (Exception e) {
+                        return List.<Map<String, Object>>of();
+                    }
+                })
+                .orElse(List.of());
+    }
+
+    // ── Legacy pipeline (fallback / routing disabled) ────────────────────────
+
+    private QueryResult legacyQuery(String question, String conversationId) {
         var response = chatClientBuilder.build()
                 .prompt()
-                .system(SYSTEM_PROMPT)
+                .system(LEGACY_SYSTEM_PROMPT)
                 .advisors(a -> a.param(CONVERSATION_ID_KEY, conversationId))
                 .advisors(buildMemoryAdvisor(), buildRagAdvisor())
                 .user(question)
@@ -63,9 +191,9 @@ public class RagService {
         return new QueryResult(answer, buildSources(docs));
     }
 
-    public Flux<String> query_stream(String question, String conversationId) {
-        // W Spring AI 2.0.1 streaming advisor nie przenosi kontekstu (qa_retrieved_documents)
-        // do ChatClientResponse — pobieramy dokumenty bezpośrednio z VectorStore przed streamem.
+    private Flux<String> legacyStream(String question, String conversationId) {
+        // W Spring AI 2.0.1 streaming advisor nie przenosi qa_retrieved_documents
+        // do ChatClientResponse — pobieramy dokumenty bezpośrednio przed streamem.
         var search = ragProperties.search();
         List<Document> docs = vectorStore.similaritySearch(
                 SearchRequest.builder()
@@ -85,7 +213,7 @@ public class RagService {
 
         Flux<String> textFlux = chatClientBuilder.build()
                 .prompt()
-                .system(SYSTEM_PROMPT)
+                .system(LEGACY_SYSTEM_PROMPT)
                 .advisors(a -> a.param(CONVERSATION_ID_KEY, conversationId))
                 .advisors(buildMemoryAdvisor(), buildRagAdvisor())
                 .user(question)
@@ -98,9 +226,10 @@ public class RagService {
         return Flux.concat(sourcesFlux, textFlux);
     }
 
-    // conversationId izoluje historię per wątek chatu — różne wątki nie widzą swoich wiadomości.
-    // W Spring AI 2.0.1 ID przekazywany jest przez param "chat_memory_conversation_id",
-    // a nie przez builder — advisor odczytuje go z kontekstu żądania.
+    // ── Shared helpers ───────────────────────────────────────────────────────
+
+    // conversationId izoluje historię per wątek chatu. W Spring AI 2.0.1 ID przekazywany
+    // przez param "chat_memory_conversation_id" — advisor odczytuje go z kontekstu żądania.
     private static final String CONVERSATION_ID_KEY = "chat_memory_conversation_id";
 
     private MessageChatMemoryAdvisor buildMemoryAdvisor() {
@@ -134,6 +263,8 @@ public class RagService {
                 ))
                 .toList();
     }
+
+    // ── Other endpoints ──────────────────────────────────────────────────────
 
     // Zwraca unikalne nazwy plików zaindeksowanych w aktywnym vector store.
     // Używa szerokiego similarity search z niskim progiem zamiast natywnego listowania,

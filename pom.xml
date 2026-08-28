@@ -36,6 +36,13 @@
                 <artifactId>jedis</artifactId>
                 <version>7.4.1</version>
             </dependency>
+            <!-- ADK 1.8.0 requires Guava JRE variant (ImmutableList.toImmutableList()).
+                 Qdrant pulls in the -android variant which lacks Java stream collectors. -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>33.4.8-jre</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -103,6 +110,20 @@
             <groupId>io.grpc</groupId>
             <artifactId>grpc-api</artifactId>
             <version>1.65.1</version>
+        </dependency>
+
+        <!-- Google ADK — agent framework -->
+        <dependency>
+            <groupId>com.google.adk</groupId>
+            <artifactId>google-adk</artifactId>
+            <version>1.8.0</version>
+        </dependency>
+
+        <!-- ADK Spring AI adapter — opakowuje ChatModel dla ADK bez LangChain4j -->
+        <dependency>
+            <groupId>com.google.adk</groupId>
+            <artifactId>google-adk-spring-ai</artifactId>
+            <version>1.8.0</version>
         </dependency>
     </dependencies>
     <build>
