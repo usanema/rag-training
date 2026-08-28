@@ -1,75 +1,51 @@
-# RAG Studio — kontekst projektu
+# RAG Studio — Backend (Spring Boot)
 
-Projekt edukacyjny do nauki RAG (Retrieval-Augmented Generation). Paweł Nowik buduje go
-hands-on, ucząc się backendu Spring AI i frontendu React/TypeScript.
+Projekt edukacyjny do nauki RAG. Paweł Nowik — backend developer, uczy się Spring AI hands-on.
+Frontend znajduje się w `frontend/` — jego kontekst jest w `frontend/CLAUDE.md`.
 
 ## Stack
 
-| Warstwa | Technologia |
-|---------|-------------|
-| Backend | Java 21, Spring Boot 4.1.1, Spring AI 2.0.1 |
-| Frontend | React 19, TypeScript, Vite 8, `marked` + DOMPurify |
-| Vector store | Redis Stack (domyślny) lub Qdrant — przełączalne w runtime |
-| Chat model | `minimax/minimax-m2.7` przez OpenRouter (`CHAT_BASE_URL=https://openrouter.ai/api/v1`) |
-| Embedding model | `nvidia/llama-nemotron-embed-vl-1b-v2:free` przez OpenRouter |
-| Uruchomienie | backend: `mvn spring-boot:run`, frontend: `npm run dev` (w `frontend/`) |
+| | |
+|--|--|
+| Java | 21 |
+| Spring Boot | 4.1.1 (wymagane przez Spring AI 2.0.1 — wciąga Boot 4.x jako transitive) |
+| Spring AI | 2.0.1 |
+| Vector stores | Redis Stack (domyślny) + Qdrant — przełączalne w runtime |
+| Chat model | `minimax/minimax-m2.7` przez OpenRouter |
+| Embedding | `nvidia/llama-nemotron-embed-vl-1b-v2:free` przez OpenRouter |
 
-## Kluczowe niuanse techniczne
+## Uruchamianie
 
-### Spring AI 2.0.1 — zmiany względem 1.x
-- `spring-boot-starter-parent` musi być **4.1.1** (Spring AI 2.0.1 wciąga Boot 4.x jako transitive)
-- `redis.clients:jedis` pinowany na **7.4.1** w `dependencyManagement` (Boot 4.x zarządza 6.x)
-- `JedisPooled` → `RedisClient.create(host, port)` w `AppConfig` (różne klasy w Jedis 7.x)
-- Artifact `spring-ai-advisors-vector-store` → `spring-ai-vector-store-advisor`
-- Dodano `spring-ai-starter-model-chat-memory` dla `MessageChatMemoryAdvisor`
-- `spring.ai.openai.embedding.options.encoding-format: float` — NVIDIA embeddings nie obsługują base64
-- `spring.main.allow-bean-definition-overriding: true` — Boot 4.x Jackson bean conflict
-- `CHAT_BASE_URL` i `EMBEDDING_BASE_URL` muszą zawierać `/v1` (nowy SDK nie dodaje go sam)
+```bash
+# Wymagane serwisy (Docker)
+docker run -d --name redis-stack -p 6379:6379 redis/redis-stack
+docker run -d --name qdrant -p 6334:6334 qdrant/qdrant
 
-### Spring AI 2.0.1 — streaming i advisors
-- `QuestionAnswerAdvisor` **nie propaguje** `qa_retrieved_documents` przez `ChatClientResponse.context()` w streaming mode
-- Źródła pobierane są bezpośrednio z `VectorStore.similaritySearch()` **przed** streamem, wysyłane jako pierwsze SSE event (`__SOURCES__:[...]`)
-- `conversationId` do `MessageChatMemoryAdvisor` przekazywany przez `.advisors(a -> a.param("chat_memory_conversation_id", conversationId))`
+mvn spring-boot:run
+# → http://localhost:8080
+```
 
-### SSE parsing (frontend `useChat.ts`)
-- Buffer dzielony po `\n\n` (granice eventów SSE)
-- Każdy event może mieć wiele linii `data:`; łączone przez `join('\n')`
-- `l.slice(5)` bez `.replace(/^ /, '')` — Spring wysyła `data:` + token bez dodatkowej spacji; token ze spacją na początku (granica słowa) przychodzi jako `data: word`, `slice(5)` = ` word` → spacja zachowana
-- Protokół `__SOURCES__:` — prefix w danych SSE dla metadanych źródeł
+Zmienne środowiskowe w `.env` (ładowane przez `dotenv-java` przy starcie).
 
-### Pamięć konwersacji
-- `InMemoryChatMemoryRepository` + `MessageWindowChatMemory` (max 20 wiadomości)
-- Frontend generuje `conversationId` jako `useRef` (nie `useState`!) przy starcie; reset przez "Nowy czat"
-- Każde pytanie wysyła `?conversationId=...` do obu endpointów
-
-## Struktura projektu
+## Struktura kodu
 
 ```
 src/main/java/com/pawer/
 ├── config/
-│   ├── AppConfig.java          — beany: ChatMemory, RedisVectorStore, QdrantVectorStore
+│   ├── AppConfig.java          — ChatMemory bean, RedisVectorStore, QdrantVectorStore
 │   └── RagProperties.java      — @ConfigurationProperties(prefix="rag")
 ├── controller/
-│   └── RagController.java      — REST API /api/rag/*
+│   ├── RagController.java      — REST API /api/rag/*
+│   └── GlobalExceptionHandler.java
 ├── service/
 │   ├── RagService.java         — query(), query_stream(), listDocuments()
 │   ├── PdfIngestionService.java — ingest(), preview(), delete()
-│   └── VectorStoreRouter.java  — przełączanie między Redis/Qdrant
+│   └── VectorStoreRouter.java  — przełączanie Redis/Qdrant
 ├── chunking/
 │   ├── ChunkingStrategy.java   — enum: TOKEN, PARAGRAPH, SENTENCE, HIERARCHICAL, SEMANTIC
 │   ├── ChunkerFactory.java
 │   └── strategy/               — 5 implementacji PdfChunker
-└── monitoring/                 — health check przy starcie
-
-frontend/src/
-├── hooks/useChat.ts            — SSE streaming, conversationId, sendMessage, clearHistory
-├── components/
-│   ├── ChatMessage.tsx         — markdown render (user bubble / assistant full-width)
-│   ├── ChatInput.tsx           — auto-resize textarea, Enter = wyślij
-│   ├── SourceBadge.tsx         — lista źródeł z numerami stron
-│   ├── DocumentList.tsx        — lista dokumentów w sidebarze (BAZA RAG)
-│   └── SettingsPanel.tsx       — sliding panel: store switcher, chunking, upload PDF
-└── App.tsx                     — layout: sidebar + chat
+└── monitoring/                 — health check modelu i embeddingu przy starcie
 ```
 
 ## REST API
@@ -88,25 +64,32 @@ frontend/src/
 | GET | `/api/rag/query/stream?q=&conversationId=` | SSE streaming |
 | GET | `/api/rag/similarity?a=&b=` | cosine similarity dwóch tekstów |
 
-## Uruchamianie lokalnie
+## Krytyczne niuanse Spring AI 2.0.1
 
-```bash
-# Wymagane serwisy (Docker)
-docker run -d --name redis-stack -p 6379:6379 redis/redis-stack
-docker run -d --name qdrant -p 6334:6334 qdrant/qdrant
+### Zależności i wersje
+- **Jedis pinowany na 7.4.1** w `dependencyManagement` — Boot 4.x zarządza 6.x, a Redis Store wymaga 7.x (`RedisClient` interface)
+- `JedisPooled` → `RedisClient.create(host, port)` w `AppConfig` — różne klasy w Jedis 7.x (rodzeństwo pod `UnifiedJedis`, nie można rzutować)
+- Artifact zmieniony: `spring-ai-advisors-vector-store` → `spring-ai-vector-store-advisor`
+- Dodano: `spring-ai-starter-model-chat-memory`
 
-# Backend
-mvn spring-boot:run
+### Konfiguracja `application.yml`
+- `spring.main.allow-bean-definition-overriding: true` — Boot 4.x Jackson bean conflict
+- `spring.ai.openai.embedding.options.encoding-format: float` — NVIDIA embeddings nie obsługują base64
+- `CHAT_BASE_URL` i `EMBEDDING_BASE_URL` muszą zawierać `/v1` — nowy `openai-java` SDK nie dodaje go automatycznie
 
-# Frontend (osobny terminal)
-cd frontend && npm run dev
-# → http://localhost:3000 (Vite proxy do :8080)
-```
+### Streaming i advisors — pułapka
+`QuestionAnswerAdvisor` **nie propaguje** `qa_retrieved_documents` do `ChatClientResponse.context()` w trybie streaming (Spring AI 2.0.1). Efekt: `response.getMetadata().get(RETRIEVED_DOCUMENTS)` zawsze null.
 
-Zmienne środowiskowe w `.env` (ładowane przez `dotenv-java`).
+**Rozwiązanie w `RagService.query_stream()`**: wyszukujemy dokumenty bezpośrednio z `VectorStore` przed startem streamu i wysyłamy je jako pierwsze SSE event (`__SOURCES__:[...]`). RAG advisor nadal augmentuje prompt własnym wyszukiwaniem.
 
-## Planowane funkcje (backlog)
+### Pamięć konwersacji
+- Bean: `MessageWindowChatMemory` + `InMemoryChatMemoryRepository` (max 20 wiadomości)
+- `conversationId` przekazywany przez `.advisors(a -> a.param("chat_memory_conversation_id", id))`
+- Konstruktor `MessageChatMemoryAdvisor.Builder` **nie ma** metody `.conversationId()` w 2.0.1
 
-- **Routing zapytań przez Google ADK** — przed każdym query: klasyfikacja czy pytanie dotyczy dokumentów RAG czy jest ogólne; jeśli ogólne — pomijanie `QuestionAnswerAdvisor` (tylko `ChatMemory`)
-  - dependency: `com.google.adk:google-adk:1.8.0`
-  - łączenie z OpenRouter przez LangChain4j `OpenAiStreamingChatModel`
+### SSE — format eventów
+Spring wysyła `data:{token}\n\n` bez dodatkowej spacji. Token z początkową spacją (granica słowa) przychodzi jako `data: word`. Parsowanie: `l.slice(5)` — **bez** `.replace(/^ /, '')`, bo ta spacja to content, nie artefakt protokołu SSE.
+
+## Planowane funkcje
+
+- **Routing zapytań przez Google ADK** (`com.google.adk:google-adk:1.8.0`) — klasyfikacja pytania przed każdym query: RAG vs. ogólne. Jeśli ogólne → pomijamy `QuestionAnswerAdvisor`. Połączenie z OpenRouter przez LangChain4j `OpenAiStreamingChatModel`.
