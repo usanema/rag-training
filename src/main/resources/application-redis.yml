@@ -1,0 +1,11 @@
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration
+  ai:
+    vectorstore:
+      redis:
+        uri: redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}
+        index: ${REDIS_INDEX:documents}
+        prefix: ${REDIS_PREFIX:doc:}
+        initialize-schema: true

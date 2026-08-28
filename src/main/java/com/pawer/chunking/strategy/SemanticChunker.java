@@ -41,8 +41,8 @@ public class SemanticChunker implements PdfChunker {
     private final RagProperties ragProperties;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private static final String PROPOSITION_PROMPT = """
-            Twoim zadaniem jest podzielenie poniższego tekstu na atomowe, semantyczne fragmenty.
+    private static final String PROPOSITION_SYSTEM_PROMPT = """
+            Twoim zadaniem jest podzielenie dostarczonego tekstu na atomowe, semantyczne fragmenty.
 
             Zasady:
             1. Każdy fragment powinien być kompletną, zrozumiałą myślą lub faktem
@@ -53,9 +53,6 @@ public class SemanticChunker implements PdfChunker {
 
             Zwróć WYŁĄCZNIE poprawny JSON bez żadnego opisu ani znaczników markdown:
             {"chunks": ["fragment1", "fragment2", "fragment3"]}
-
-            Tekst do podziału:
-            {text}
             """;
 
     @Override
@@ -89,16 +86,15 @@ public class SemanticChunker implements PdfChunker {
         log.info("[SEMANTIC] Przetwarzam {} sekcji przez LLM...", sections.size());
 
         List<Document> chunks = new ArrayList<>();
-        var chatClient = chatClientBuilder.build();
 
         for (int i = 0; i < sections.size(); i++) {
             Document section = sections.get(i);
-            String pageNum = (String) section.getMetadata().getOrDefault("page_number", "?");
+            String pageNum = section.getMetadata().getOrDefault("page_number", "?").toString();
 
             log.debug("[SEMANTIC] Sekcja {}/{} (strona {})", i + 1, sections.size(), pageNum);
 
             try {
-                List<String> propositions = callLlm(chatClient, section.getText());
+                List<String> propositions = callLlm(section.getText().trim().replaceAll("\\s+", " "));
 
                 for (String proposition : propositions) {
                     if (proposition.trim().length() < 20) continue; // pomiń za krótkie
@@ -119,13 +115,19 @@ public class SemanticChunker implements PdfChunker {
 
         enrichMetadata(chunks, pdfResource.getFilename());
 
-        log.info("[SEMANTIC] {} sekcji → {} chunków (semantic propositions)", sections.size(), chunks.size());
-        return ChunkingResult.of(chunks);
+        List<Document> normalized = chunks.stream()
+                .map(c -> new Document(c.getText().trim().replaceAll("\\s+", " "), c.getMetadata()))
+                .toList();
+
+        log.info("[SEMANTIC] {} sekcji → {} chunków (semantic propositions)", sections.size(), normalized.size());
+        return ChunkingResult.of(normalized);
     }
 
-    private List<String> callLlm(ChatClient chatClient, String text) throws Exception {
-        String response = chatClient.prompt()
-                .user(u -> u.text(PROPOSITION_PROMPT).param("text", text))
+    private List<String> callLlm(String text) throws Exception {
+        String response = chatClientBuilder.build()
+                .prompt()
+                .system(PROPOSITION_SYSTEM_PROMPT)
+                .user(text)
                 .call()
                 .content();
 

@@ -1,29 +1,24 @@
 spring:
+  main:
+    allow-bean-definition-overriding: true
+  # Oba auto-configure wykluczone globalnie — beany konfigurujemy ręcznie w AppConfig
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration
+      - org.springframework.ai.vectorstore.redis.autoconfigure.RedisVectorStoreAutoConfiguration
   ai:
     openai:
-      # Chat model
       api-key: ${OPENAI_API_KEY:local}
       base-url: ${CHAT_BASE_URL:https://api.openai.com}
       chat:
         options:
           model: ${CHAT_MODEL:gpt-4o-mini}
-      
-      # Embedding model (OpenAI-compatible)
       embedding:
         api-key: ${EMBEDDING_API_KEY:local}
         base-url: ${EMBEDDING_BASE_URL:http://localhost:8080}
         options:
           model: ${EMBEDDING_MODEL:your-model-name}
-
-    vectorstore:
-      qdrant:
-        host: ${QDRANT_HOST:localhost}
-        port: ${QDRANT_PORT:6334}
-        collection-name: ${QDRANT_COLLECTION:documents}
-        use-tls: ${QDRANT_TLS:false}
-        # api-key: ${QDRANT_API_KEY} 
-        initialize-schema: true
-
+          encoding-format: float
   servlet:
     multipart:
       max-file-size: 50MB
@@ -37,3 +32,5 @@ rag:
   search:
     top-k: ${TOP_K:5}
     similarity-threshold: ${SIMILARITY_THRESHOLD:0.7}
+  routing:
+    enabled: ${ROUTING_ENABLED:true}

@@ -3,7 +3,9 @@ package com.pawer.controller;
 import com.pawer.chunking.ChunkingStrategy;
 import com.pawer.service.PdfIngestionService;
 import com.pawer.service.RagService;
+import com.pawer.service.VectorStoreRouter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +23,31 @@ public class RagController {
 
     private final PdfIngestionService ingestionService;
     private final RagService ragService;
+    private final VectorStoreRouter vectorStoreRouter;
+    private final EmbeddingModel embeddingModel;
+
+    // ── Vector store — odczyt i przełączanie ────────────────────────────────
+
+    @GetMapping("/info")
+    public ResponseEntity<Map<String, Object>> info() {
+        return ResponseEntity.ok(Map.of(
+                "vectorStore", vectorStoreRouter.getActiveStore()
+        ));
+    }
+
+    @GetMapping("/store")
+    public ResponseEntity<Map<String, Object>> getStore() {
+        return ResponseEntity.ok(Map.of(
+                "active",    vectorStoreRouter.getActiveStore(),
+                "available", VectorStoreRouter.AVAILABLE
+        ));
+    }
+
+    @PutMapping("/store/{name}")
+    public ResponseEntity<Map<String, Object>> switchStore(@PathVariable String name) {
+        vectorStoreRouter.switchTo(name);
+        return ResponseEntity.ok(Map.of("active", vectorStoreRouter.getActiveStore()));
+    }
 
     // ── Dostępne strategie ──────────────────────────────────────────────────
     @GetMapping("/strategies")
@@ -59,17 +86,31 @@ public class RagController {
         return ResponseEntity.ok(ingestionService.preview(file.getResource(), strategy));
     }
 
+    // ── Lista zaindeksowanych dokumentów ───────────────────────────────────
+    @GetMapping("/documents")
+    public ResponseEntity<List<String>> documents() {
+        return ResponseEntity.ok(ragService.listDocuments());
+    }
+
     // ── Zapytaj (zwykły request) ────────────────────────────────────────────
     @GetMapping("/query")
-    public ResponseEntity<Map<String, Object>> query(@RequestParam String q) {
-        String answer = ragService.query(q);
-        return ResponseEntity.ok(Map.of("question", q, "answer", answer));
+    public ResponseEntity<Map<String, Object>> query(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "default") String conversationId) {
+        var result = ragService.query(q, conversationId);
+        return ResponseEntity.ok(Map.of(
+                "question", q,
+                "answer",   result.answer(),
+                "sources",  result.sources()
+        ));
     }
 
     // ── Zapytaj (streaming SSE) ─────────────────────────────────────────────
     @GetMapping(value = "/query/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> queryStream(@RequestParam String q) {
-        return ragService.query_stream(q);
+    public Flux<String> queryStream(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "default") String conversationId) {
+        return ragService.query_stream(q, conversationId);
     }
 
     // ── Usuń dokumenty po nazwie pliku ──────────────────────────────────────
@@ -77,6 +118,15 @@ public class RagController {
     public ResponseEntity<Map<String, Object>> delete(@RequestParam String fileName) {
         ingestionService.delete(fileName);
         return ResponseEntity.ok(Map.of("file", fileName, "status", "usunięto"));
+    }
+
+    // ── Cosine similarity dwóch tekstów ────────────────────────────────────
+    @GetMapping("/similarity")
+    public ResponseEntity<Map<String, Object>> similarity(@RequestParam String a, @RequestParam String b) {
+        float[] vecA = embeddingModel.embed(a);
+        float[] vecB = embeddingModel.embed(b);
+        double score = ragService.cosineSimilarity(vecA, vecB);
+        return ResponseEntity.ok(Map.of("a", a, "b", b, "score", score));
     }
 
     // ── Opisy strategii ─────────────────────────────────────────────────────

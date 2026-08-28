@@ -1,0 +1,17 @@
+# Redis Stack (Redis + RediSearch)
+docker run -d \
+  --name redis \
+  -p 6379:6379 \
+  -p 8001:8001 \
+  -v redis_storage:/data \
+  --restart unless-stopped \
+  redis/redis-stack:latest
+
+# Qdrant
+docker run -d \
+  --name qdrant \
+  -p 6333:6333 \
+  -p 6334:6334 \
+  -v qdrant_storage:/qdrant/storage \
+  --restart unless-stopped \
+  qdrant/qdrant:latest
