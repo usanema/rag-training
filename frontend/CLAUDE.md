@@ -1,4 +1,4 @@
-# RAG Studio — Frontend (React + TypeScript + Vite)
+# RAG Studio — Frontend (React + TypeScript + webpack)
 
 Interfejs czatu do odpytywania RAG. Kontekst backendu (Spring Boot) jest w `../CLAUDE.md`.
 
@@ -7,20 +7,20 @@ Interfejs czatu do odpytywania RAG. Kontekst backendu (Spring Boot) jest w `../C
 | | |
 |--|--|
 | React | 19 |
-| TypeScript | 5 |
-| Vite | 6 (dev server :5173, proxy → :8080) |
-| Markdown | `react-markdown` + `remark-gfm` |
+| TypeScript | 6 |
+| webpack | 5 (dev server :3000, proxy → :8080) |
+| Markdown | `marked` + `dompurify` |
 
 ## Uruchamianie
 
 ```bash
 cd frontend
-npm run dev   # http://localhost:5173
-npm run build
-npx tsc --noEmit   # type check
+npm run dev          # http://localhost:3000
+npm run build        # → ../src/main/resources/static/
+npm run type-check   # tsc --noEmit
 ```
 
-Proxy API: wszystkie `/api/*` → `http://localhost:8080` (skonfigurowane w `vite.config.ts`).
+Proxy API: wszystkie `/api/*` → `http://localhost:8080` (skonfigurowane w `webpack.config.cjs`).
 
 ## Struktura
 
